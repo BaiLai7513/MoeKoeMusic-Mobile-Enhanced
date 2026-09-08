@@ -1,0 +1,6 @@
+dist/
+*.keystore
+*.jks
+build/
+.DS_Store
+Thumbs.db
