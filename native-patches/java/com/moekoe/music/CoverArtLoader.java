@@ -107,6 +107,11 @@ public final class CoverArtLoader {
                     .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
                     .putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap);
             session.setMetadata(builder.build());
+            try {
+                Class<?> service = Class.forName("com.moekoe.music.MusicForegroundService");
+                service.getMethod("setArtworkBitmap", Bitmap.class).invoke(null, bitmap);
+            } catch (Throwable ignored2) {
+            }
         } catch (Throwable ignored) {
         }
     }

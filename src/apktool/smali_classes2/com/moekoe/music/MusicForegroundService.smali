@@ -14,6 +14,8 @@
 
 .field private static artworkUrl:Ljava/lang/String;
 
+.field private static artworkBitmap:Landroid/graphics/Bitmap;
+
 .field private static final NOTIFICATION_ID:I = 0x1979
 
 .field private static final TAG:Ljava/lang/String; = "MoeKoeService"
@@ -25,6 +27,8 @@
 .field private appKeeper:Lcom/moekoe/music/MusicAppKeeper;
 
 .field private lastNotificationPlaying:Z
+
+.field private lastNotificationText:Ljava/lang/String;
 
 .field private lastNotificationTitle:Ljava/lang/String;
 
@@ -226,6 +230,15 @@
     move-result-object v13
 
     .line 138
+    sget-object v15, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
+
+    if-eqz v15, :cond_no_large_icon
+
+    invoke-virtual {v13, v15}, Landroid/app/Notification$Builder;->setLargeIcon(Landroid/graphics/Bitmap;)Landroid/app/Notification$Builder;
+
+    move-result-object v13
+
+    :cond_no_large_icon
     const v14, 0x1080024
 
     invoke-virtual {v13, v14}, Landroid/app/Notification$Builder;->setSmallIcon(I)Landroid/app/Notification$Builder;
@@ -317,6 +330,35 @@
     move-result-object v2
 
     return-object v2
+.end method
+
+.method public static setArtworkBitmap(Landroid/graphics/Bitmap;)V
+    .locals 4
+    .param p0, "bitmap"    # Landroid/graphics/Bitmap;
+
+    sput-object p0, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
+
+    sget-object v0, Lcom/moekoe/music/MusicForegroundService;->instance:Lcom/moekoe/music/MusicForegroundService;
+
+    if-eqz v0, :cond_0
+
+    iget-object v1, v0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationTitle:Ljava/lang/String;
+
+    if-eqz v1, :cond_0
+
+    iget-object v2, v0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationText:Ljava/lang/String;
+
+    if-nez v2, :cond_1
+
+    const-string v2, ""
+
+    :cond_1
+    iget-boolean v3, v0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationPlaying:Z
+
+    invoke-direct {v0, v1, v2, v3}, Lcom/moekoe/music/MusicForegroundService;->updateNotification(Ljava/lang/String;Ljava/lang/String;Z)V
+
+    :cond_0
+    return-void
 .end method
 
 .method private createChannel()V
@@ -606,6 +648,8 @@
     invoke-direct {p0, v6, v5, v4}, Lcom/moekoe/music/MusicForegroundService;->updateNotification(Ljava/lang/String;Ljava/lang/String;Z)V
 
     iput-object v6, p0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationTitle:Ljava/lang/String;
+
+    iput-object v5, p0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationText:Ljava/lang/String;
 
     iput-boolean v4, p0, Lcom/moekoe/music/MusicForegroundService;->lastNotificationPlaying:Z
 

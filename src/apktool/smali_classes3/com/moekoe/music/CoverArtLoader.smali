@@ -95,14 +95,14 @@
 .end method
 
 .method private static apply(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
-    .locals 3
+    .locals 4
 
     .line 92
     if-eqz p0, :cond_3
 
     if-nez p1, :cond_0
 
-    goto :goto_1
+    goto :goto_2
 
     .line 96
     :cond_0
@@ -125,6 +125,8 @@
     move-result v1
 
     .line 99
+    const/4 v2, 0x0
+
     if-lez v1, :cond_2
 
     .line 100
@@ -135,8 +137,6 @@
     move-result-object v0
 
     .line 101
-    const/4 v2, 0x0
-
     invoke-virtual {p2, v2, v1}, Ljava/lang/String;->substring(II)Ljava/lang/String;
 
     move-result-object p2
@@ -147,10 +147,10 @@
 
     invoke-direct {v1}, Landroid/media/MediaMetadata$Builder;-><init>()V
 
-    const-string v2, "android.media.metadata.TITLE"
+    const-string v3, "android.media.metadata.TITLE"
 
     .line 104
-    invoke-virtual {v1, v2, p2}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
+    invoke-virtual {v1, v3, p2}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
@@ -180,31 +180,72 @@
     .line 108
     invoke-virtual {p2, p3, p1}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
 
-    move-result-object p1
+    move-result-object p2
 
     .line 109
-    invoke-virtual {p1}, Landroid/media/MediaMetadata$Builder;->build()Landroid/media/MediaMetadata;
+    invoke-virtual {p2}, Landroid/media/MediaMetadata$Builder;->build()Landroid/media/MediaMetadata;
 
-    move-result-object p1
+    move-result-object p2
 
-    invoke-virtual {p0, p1}, Landroid/media/session/MediaSession;->setMetadata(Landroid/media/MediaMetadata;)V
+    invoke-virtual {p0, p2}, Landroid/media/session/MediaSession;->setMetadata(Landroid/media/MediaMetadata;)V
     :try_end_0
-    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_1
 
     .line 111
+    :try_start_1
+    const-string p0, "com.moekoe.music.MusicForegroundService"
+
+    invoke-static {p0}, Ljava/lang/Class;->forName(Ljava/lang/String;)Ljava/lang/Class;
+
+    move-result-object p0
+
+    .line 112
+    const-string p2, "setArtworkBitmap"
+
+    const/4 p3, 0x1
+
+    new-array p4, p3, [Ljava/lang/Class;
+
+    const-class v0, Landroid/graphics/Bitmap;
+
+    aput-object v0, p4, v2
+
+    invoke-virtual {p0, p2, p4}, Ljava/lang/Class;->getMethod(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;
+
+    move-result-object p0
+
+    new-array p2, p3, [Ljava/lang/Object;
+
+    aput-object p1, p2, v2
+
+    const/4 p1, 0x0
+
+    invoke-virtual {p0, p1, p2}, Ljava/lang/reflect/Method;->invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;
+    :try_end_1
+    .catchall {:try_start_1 .. :try_end_1} :catchall_0
+
+    .line 114
     goto :goto_0
 
-    .line 110
+    .line 113
     :catchall_0
     move-exception p0
 
-    .line 112
+    .line 116
     :goto_0
+    goto :goto_1
+
+    .line 115
+    :catchall_1
+    move-exception p0
+
+    .line 117
+    :goto_1
     return-void
 
     .line 93
     :cond_3
-    :goto_1
+    :goto_2
     return-void
 .end method
 
