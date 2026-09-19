@@ -553,29 +553,6 @@
 
     if-nez v4, :cond_5
 
-    sget-object v3, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
-
-    if-eqz v3, :cond_fallback_art
-
-    invoke-virtual {p0}, Lcom/moekoe/music/MusicForegroundService;->getApplicationInfo()Landroid/content/pm/ApplicationInfo;
-
-    move-result-object v3
-
-    iget v3, v3, Landroid/content/pm/ApplicationInfo;->icon:I
-
-    invoke-virtual {p0}, Lcom/moekoe/music/MusicForegroundService;->getResources()Landroid/content/res/Resources;
-
-    move-result-object v5
-
-    invoke-static {v5, v3}, Landroid/graphics/BitmapFactory;->decodeResource(Landroid/content/res/Resources;I)Landroid/graphics/Bitmap;
-
-    move-result-object v3
-
-    if-eqz v3, :cond_fallback_art
-
-    sput-object v3, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
-
-    :cond_fallback_art
     .line 212
     new-instance v4, Landroid/media/MediaMetadata$Builder;
 

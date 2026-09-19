@@ -137,23 +137,19 @@ public final class CoverArtLoader {
                 artist = title.substring(sep + 3);
                 title = title.substring(0, sep);
             }
-            MediaMetadata metadata = new MediaMetadata.Builder()
+            MediaMetadata.Builder builder = new MediaMetadata.Builder()
                     .putString(MediaMetadata.METADATA_KEY_TITLE, title)
                     .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
                     .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
                     .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
                     .putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap)
-                    .putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, bitmap)
-                    .build();
-            session.setMetadata(metadata);
+                    .putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, bitmap);
+            session.setMetadata(builder.build());
             try {
                 Class<?> service = Class.forName("com.moekoe.music.MusicForegroundService");
                 service.getMethod("setArtworkBitmap", Bitmap.class).invoke(null, bitmap);
             } catch (Throwable ignored2) {
             }
-            // Some OEM lockscreens only refresh the media artwork when the
-            // MediaSession metadata changes after the notification update.
-            session.setMetadata(metadata);
         } catch (Throwable ignored) {
         }
     }
