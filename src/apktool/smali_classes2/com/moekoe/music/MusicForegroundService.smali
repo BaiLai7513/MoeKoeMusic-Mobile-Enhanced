@@ -12,6 +12,8 @@
 
 .field private static final CHANNEL_ID:Ljava/lang/String; = "moekoe_playback"
 
+.field private static artworkUrl:Ljava/lang/String;
+
 .field private static final NOTIFICATION_ID:I = 0x1979
 
 .field private static final TAG:Ljava/lang/String; = "MoeKoeService"
@@ -555,6 +557,30 @@
 
     move-result-object v4
 
+    sget-object v5, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
+
+    if-eqz v5, :cond_art
+
+    invoke-virtual {v5}, Ljava/lang/String;->isEmpty()Z
+
+    move-result v6
+
+    if-eqz v6, :cond_art
+
+    const-string v6, "android.media.metadata.ALBUM_ART_URI"
+
+    invoke-virtual {v4, v6, v5}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
+
+    move-result-object v4
+
+    const-string v6, "android.media.metadata.ART_URI"
+
+    invoke-virtual {v4, v6, v5}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
+
+    move-result-object v4
+
+    :cond_art
+
     .line 215
     .local v4, "metadataBuilder":Landroid/media/MediaMetadata$Builder;
     iget-object v5, p0, Lcom/moekoe/music/MusicForegroundService;->mediaSession:Landroid/media/session/MediaSession;
@@ -734,6 +760,36 @@
     invoke-direct/range {v0 .. v6}, Lcom/moekoe/music/MusicForegroundService;->onWebViewPlaybackChanged(ZJJLjava/lang/String;)V
 
     .line 40
+    :cond_0
+    return-void
+.end method
+
+.method public static updatePlaybackStateEx(ZJJLjava/lang/String;Ljava/lang/String;)V
+    .locals 9
+    .param p0, "playing"    # Z
+    .param p1, "position"    # J
+    .param p3, "duration"    # J
+    .param p5, "title"    # Ljava/lang/String;
+    .param p6, "artwork"    # Ljava/lang/String;
+
+    sput-object p6, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
+
+    sget-object v8, Lcom/moekoe/music/MusicForegroundService;->instance:Lcom/moekoe/music/MusicForegroundService;
+
+    if-eqz v8, :cond_0
+
+    move-object v1, v8
+
+    move v2, p0
+
+    move-wide v3, p1
+
+    move-wide v5, p3
+
+    move-object v7, p5
+
+    invoke-direct/range {v1 .. v7}, Lcom/moekoe/music/MusicForegroundService;->onWebViewPlaybackChanged(ZJJLjava/lang/String;)V
+
     :cond_0
     return-void
 .end method

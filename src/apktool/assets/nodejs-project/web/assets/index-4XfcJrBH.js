@@ -1590,3 +1590,44 @@ ${O.filePath}`)}},ze=async(w,O)=>{w?.selectAction&&await ve[w.selectAction]?.(O)
     }
   }, true);
 })();
+
+(function(){
+  function readCurrent(){
+    var a = document.querySelector('audio');
+    if(!a) return null;
+    var name = a.getAttribute('data-song-name') || '';
+    var author = a.getAttribute('data-song-author') || '';
+    if(!name){
+      var t = document.querySelector('.player-container .song-title') || document.querySelector('.song-title');
+      name = t ? (t.textContent || '').trim() : (document.title || '');
+    }
+    if(!author){
+      var ar = document.querySelector('.player-container .artist') || document.querySelector('.artist');
+      author = ar ? (ar.textContent || '').trim() : '';
+    }
+    var song = {};
+    try{ song = JSON.parse(localStorage.getItem('current_song') || '{}'); }catch(e){}
+    var cover = song.img || '';
+    if(!cover){
+      var img = document.querySelector('.player-container .album-art img') || document.querySelector('.album-art img') || document.querySelector('.lyrics-screen .album-art-container img');
+      cover = img ? (img.src || '') : '';
+    }
+    var title = author ? (name + ' - ' + author) : name;
+    return {a:a, title:title, cover:cover};
+  }
+  if(window.AndroidMediaBridge && !AndroidMediaBridge.__moeArtHooked){
+    AndroidMediaBridge.__moeArtHooked = true;
+    setInterval(function(){
+      try{
+        var info = readCurrent();
+        if(!info) return;
+        if(AndroidMediaBridge.onStateEx){
+          var pos = (isFinite(info.a.currentTime) ? info.a.currentTime : 0) * 1000;
+          var dur = (isFinite(info.a.duration) ? info.a.duration : 0) * 1000;
+          var playing = !info.a.paused && !info.a.ended && info.a.currentTime > 0;
+          AndroidMediaBridge.onStateEx(playing, pos, dur, info.title, info.cover);
+        }
+      }catch(e){}
+    }, 700);
+  }
+})();

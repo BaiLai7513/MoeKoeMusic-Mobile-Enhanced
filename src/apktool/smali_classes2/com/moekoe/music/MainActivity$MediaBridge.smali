@@ -182,6 +182,31 @@
     return-void
 .end method
 
+.method public onStateEx(ZDDLjava/lang/String;Ljava/lang/String;)V
+    .locals 7
+    .param p1, "playing"    # Z
+    .param p2, "position"    # D
+    .param p4, "duration"    # D
+    .param p6, "title"    # Ljava/lang/String;
+    .param p7, "artwork"    # Ljava/lang/String;
+    .annotation runtime Landroid/webkit/JavascriptInterface;
+    .end annotation
+
+    double-to-long v1, p2
+
+    double-to-long v3, p4
+
+    move v0, p1
+
+    move-object v5, p6
+
+    move-object v6, p7
+
+    invoke-static/range {v0 .. v6}, Lcom/moekoe/music/MusicForegroundService;->updatePlaybackStateEx(ZJJLjava/lang/String;Ljava/lang/String;)V
+
+    return-void
+.end method
+
 .method public openAllFilesSettings()V
     .locals 1
     .annotation runtime Landroid/webkit/JavascriptInterface;
