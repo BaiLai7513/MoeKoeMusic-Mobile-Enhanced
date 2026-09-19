@@ -1,0 +1,4 @@
+# 复制为 signing.properties 后放在本地，不要提交到公开仓库
+KEYSTORE=/absolute/path/to/moekoe-release.keystore
+KS_ALIAS=moekoe
+KS_PASS=your-keystore-password
