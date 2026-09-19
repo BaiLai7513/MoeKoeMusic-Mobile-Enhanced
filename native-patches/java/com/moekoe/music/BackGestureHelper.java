@@ -36,11 +36,22 @@ public final class BackGestureHelper {
                     new InvocationHandler() {
                         @Override
                         public Object invoke(Object proxy, Method method, Object[] args) {
-                            if ("onBackInvoked".equals(method.getName())) {
+                            String name = method.getName();
+                            if ("onBackInvoked".equals(name)) {
                                 try {
                                     activity.onBackPressed();
                                 } catch (Throwable ignored) {
                                 }
+                                return null;
+                            }
+                            if ("hashCode".equals(name)) {
+                                return System.identityHashCode(proxy);
+                            }
+                            if ("equals".equals(name)) {
+                                return proxy == (args != null && args.length > 0 ? args[0] : null);
+                            }
+                            if ("toString".equals(name)) {
+                                return "MoeBackInvokedCallback";
                             }
                             return null;
                         }
