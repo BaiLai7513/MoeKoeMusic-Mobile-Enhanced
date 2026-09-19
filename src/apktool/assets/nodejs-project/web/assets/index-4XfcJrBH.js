@@ -1790,6 +1790,7 @@ ${O.filePath}`)}},ze=async(w,O)=>{w?.selectAction&&await ve[w.selectAction]?.(O)
     }
     window.addEventListener('hashchange', sync);
     window.addEventListener('popstate', sync);
+    if(window.__moeRouter && window.__moeRouter.afterEach){ window.__moeRouter.afterEach(sync); }
     if(window.MutationObserver){ new MutationObserver(sync).observe(document.body, {attributes:true, attributeFilter:['class']}); }
 
     sync();
