@@ -1,1 +1,26 @@
-if(!self.define){let s,e={};const r=(r,n)=>(r=new URL(r+".js",n).href,e[r]||new Promise(e=>{if("document"in self){const s=document.createElement("script");s.src=r,s.onload=e,document.head.appendChild(s)}else s=r,importScripts(r),e()}).then(()=>{let s=e[r];if(!s)throw new Error(`Module ${r} didn’t register its module`);return s}));self.define=(n,i)=>{const l=s||("document"in self?document.currentScript.src:"")||location.href;if(e[l])return;let a={};const o=s=>r(s,l),t={module:{uri:l},exports:a,require:o};e[l]=Promise.all(n.map(s=>t[s]||o(s))).then(s=>(i(...s),a))}}define(["./workbox-e03780b3"],function(s){"use strict";self.skipWaiting(),s.clientsClaim(),s.precacheAndRoute([{url:"index.html",revision:"bcb72870446c61c912c99c77d71951fa"},{url:"assets/workbox-window.prod.es5-BIl4cyR9.js",revision:null},{url:"assets/WavPackParser-yELIgA9V.js",revision:null},{url:"assets/WaveParser-CtEsVq87.js",revision:null},{url:"assets/OggParser-Bf-EFv3i.js",revision:null},{url:"assets/MusepackParser-BPzs13mg.js",revision:null},{url:"assets/MpegParser-DwFFqnHC.js",revision:null},{url:"assets/MP4Parser-CXMoB2nB.js",revision:null},{url:"assets/MatroskaParser-BAPm0E_j.js",revision:null},{url:"assets/index-xhELzUc2.css",revision:null},{url:"assets/index-4XfcJrBH.js",revision:null},{url:"assets/ID3v2Parser-DuaTemwb.js",revision:null},{url:"assets/FlacParser-BglpAaR0.js",revision:null},{url:"assets/DsfParser-CsgqX5xe.js",revision:null},{url:"assets/DsdiffParser-DOLvBUJ_.js",revision:null},{url:"assets/AsfParser-e7KjLdgR.js",revision:null},{url:"assets/AiffParser-fSWoNCB9.js",revision:null},{url:"assets/AbstractID3Parser-BdS3o9Ao.js",revision:null},{url:"assets/font-awesome/css/all.min.css",revision:null},{url:"assets/images/logo.png",revision:"c58d955dd953a477db4b11b0c045b4d3"},{url:"manifest.webmanifest",revision:"4f53ad60aa00cb8e07e2034a27205ab5"}],{}),s.cleanupOutdatedCaches(),s.registerRoute(new s.NavigationRoute(s.createHandlerBoundToURL("index.html"))),s.registerRoute(/^\/api\/.*$/i,new s.NetworkFirst({cacheName:"api-cache",plugins:[new s.ExpirationPlugin({maxEntries:100,maxAgeSeconds:86400}),new s.CacheableResponsePlugin({statuses:[0,200]})]}),"GET"),s.registerRoute(/\.(?:png|jpg|jpeg|svg|gif|webp|js|css|woff2)$/i,new s.StaleWhileRevalidate({cacheName:"assets-cache",plugins:[new s.ExpirationPlugin({maxEntries:100,maxAgeSeconds:604800})]}),"GET"),s.registerRoute(/\/$/,new s.NetworkFirst({cacheName:"html-cache",plugins:[new s.ExpirationPlugin({maxEntries:10,maxAgeSeconds:86400})]}),"GET")});
+/* MoeKoe Music service worker kill switch.
+ * The WebView app is served by the bundled Node server. A stale Workbox cache
+ * can keep old frontend assets after an APK update, so this worker clears all
+ * caches, unregisters itself and reloads controlled windows once.
+ */
+self.addEventListener('install', function (event) {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function (event) {
+  event.waitUntil((async function () {
+    try {
+      var keys = await caches.keys();
+      await Promise.all(keys.map(function (key) { return caches.delete(key); }));
+    } catch (err) { }
+    try {
+      await self.registration.unregister();
+    } catch (err) { }
+    try {
+      var clients = await self.clients.matchAll({ type: 'window' });
+      clients.forEach(function (client) {
+        try { client.navigate(client.url); } catch (err) { }
+      });
+    } catch (err) { }
+  })());
+});
