@@ -1748,11 +1748,14 @@ ${O.filePath}`)}},ze=async(w,O)=>{w?.selectAction&&await ve[w.selectAction]?.(O)
       if(!wrap.contains(e.target)){ menu.style.display = 'none'; fab.innerHTML = '<i class="fas fa-plus"></i>'; }
     });
     function sync(){
-      var on = (location.hash || '').indexOf('#/library') === 0;
+      var on = (location.hash || '').indexOf('#/library') === 0 && !document.body.classList.contains('moe-fullscreen-lyrics');
       wrap.style.display = on ? 'flex' : 'none';
       if(!on){ menu.style.display = 'none'; fab.innerHTML = '<i class="fas fa-plus"></i>'; }
     }
     window.addEventListener('hashchange', sync);
+    window.addEventListener('popstate', sync);
+    if(window.MutationObserver){ new MutationObserver(sync).observe(document.body, {attributes:true, attributeFilter:['class']}); }
+    setInterval(sync, 500);
     sync();
   }
   ensureCreateFab();
