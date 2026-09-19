@@ -557,30 +557,6 @@
 
     move-result-object v4
 
-    sget-object v5, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
-
-    if-eqz v5, :cond_art
-
-    invoke-virtual {v5}, Ljava/lang/String;->isEmpty()Z
-
-    move-result v6
-
-    if-eqz v6, :cond_art
-
-    const-string v6, "android.media.metadata.ALBUM_ART_URI"
-
-    invoke-virtual {v4, v6, v5}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
-
-    move-result-object v4
-
-    const-string v6, "android.media.metadata.ART_URI"
-
-    invoke-virtual {v4, v6, v5}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
-
-    move-result-object v4
-
-    :cond_art
-
     .line 215
     .local v4, "metadataBuilder":Landroid/media/MediaMetadata$Builder;
     iget-object v5, p0, Lcom/moekoe/music/MusicForegroundService;->mediaSession:Landroid/media/session/MediaSession;
@@ -591,6 +567,19 @@
 
     invoke-virtual {v5, v6}, Landroid/media/session/MediaSession;->setMetadata(Landroid/media/MediaMetadata;)V
 
+    sget-object v3, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
+
+    if-eqz v3, :cond_cover_call
+
+    invoke-virtual {v3}, Ljava/lang/String;->isEmpty()Z
+
+    move-result v6
+
+    if-nez v6, :cond_cover_call
+
+    invoke-static {v5, v3, p6, p4, p5}, Lcom/moekoe/music/CoverArtLoader;->load(Landroid/media/session/MediaSession;Ljava/lang/String;Ljava/lang/String;J)V
+
+    :cond_cover_call
     move-object v6, v1
 
     move-object v5, v0
