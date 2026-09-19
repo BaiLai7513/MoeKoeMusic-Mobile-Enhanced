@@ -2,6 +2,9 @@ package com.moekoe.music;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.os.Handler;
@@ -63,6 +66,7 @@ public final class CoverArtLoader {
                     if (code >= 200 && code < 400) {
                         in = conn.getInputStream();
                         bitmap = BitmapFactory.decodeStream(in);
+                        bitmap = sanitize(bitmap);
                     }
                 } catch (Throwable ignored) {
                 } finally {
@@ -90,6 +94,34 @@ public final class CoverArtLoader {
                 });
             }
         }, "MoeCoverArtLoader").start();
+    }
+
+    private static Bitmap sanitize(Bitmap src) {
+        if (src == null) {
+            return null;
+        }
+        try {
+            int w = src.getWidth();
+            int h = src.getHeight();
+            if (w <= 0 || h <= 0) {
+                return src;
+            }
+            int max = 512;
+            float scale = Math.min(1f, max / (float) Math.max(w, h));
+            int nw = Math.max(1, Math.round(w * scale));
+            int nh = Math.max(1, Math.round(h * scale));
+            Bitmap out = Bitmap.createBitmap(nw, nh, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(out);
+            Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+            canvas.drawBitmap(src, null, new Rect(0, 0, nw, nh), paint);
+            return out;
+        } catch (Throwable ignored) {
+            try {
+                return src.copy(Bitmap.Config.ARGB_8888, false);
+            } catch (Throwable ignored2) {
+                return src;
+            }
+        }
     }
 
     private static void apply(MediaSession session, Bitmap bitmap,

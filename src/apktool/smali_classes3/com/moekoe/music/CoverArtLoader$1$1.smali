@@ -32,7 +32,7 @@
         }
     .end annotation
 
-    .line 85
+    .line 89
     iput-object p1, p0, Lcom/moekoe/music/CoverArtLoader$1$1;->this$0:Lcom/moekoe/music/CoverArtLoader$1;
 
     iput-object p2, p0, Lcom/moekoe/music/CoverArtLoader$1$1;->val$result:Landroid/graphics/Bitmap;
@@ -47,7 +47,7 @@
 .method public run()V
     .locals 5
 
-    .line 88
+    .line 92
     iget-object v0, p0, Lcom/moekoe/music/CoverArtLoader$1$1;->this$0:Lcom/moekoe/music/CoverArtLoader$1;
 
     iget-object v0, v0, Lcom/moekoe/music/CoverArtLoader$1;->val$session:Landroid/media/session/MediaSession;
@@ -62,8 +62,8 @@
 
     iget-wide v3, v3, Lcom/moekoe/music/CoverArtLoader$1;->val$durationMs:J
 
-    invoke-static {v0, v1, v2, v3, v4}, Lcom/moekoe/music/CoverArtLoader;->access$400(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
+    invoke-static {v0, v1, v2, v3, v4}, Lcom/moekoe/music/CoverArtLoader;->access$500(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
 
-    .line 89
+    .line 93
     return-void
 .end method

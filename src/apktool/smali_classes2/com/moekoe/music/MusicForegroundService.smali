@@ -10,7 +10,7 @@
 
 .field public static final ACTION_TOGGLE:Ljava/lang/String; = "com.moekoe.music.action.TOGGLE"
 
-.field private static final CHANNEL_ID:Ljava/lang/String; = "moekoe_playback"
+.field private static final CHANNEL_ID:Ljava/lang/String; = "moekoe_playback_v2"
 
 .field private static artworkUrl:Ljava/lang/String;
 
@@ -199,7 +199,7 @@
     .line 133
     new-instance v12, Landroid/app/Notification$Builder;
 
-    const-string v13, "moekoe_playback"
+    const-string v13, "moekoe_playback_v2"
 
     invoke-direct {v12, v0, v13}, Landroid/app/Notification$Builder;-><init>(Landroid/content/Context;Ljava/lang/String;)V
 
@@ -384,7 +384,7 @@
 
     const/4 v2, 0x4
 
-    const-string v3, "moekoe_playback"
+    const-string v3, "moekoe_playback_v2"
 
     invoke-direct {v0, v3, v1, v2}, Landroid/app/NotificationChannel;-><init>(Ljava/lang/String;Ljava/lang/CharSequence;I)V
 
@@ -393,6 +393,10 @@
     const-string v1, "MoeKoe \u540e\u53f0\u97f3\u4e50\u670d\u52a1\u901a\u77e5"
 
     invoke-virtual {v0, v1}, Landroid/app/NotificationChannel;->setDescription(Ljava/lang/String;)V
+
+    const/4 v1, 0x1
+
+    invoke-virtual {v0, v1}, Landroid/app/NotificationChannel;->setLockscreenVisibility(I)V
 
     .line 158
     const-class v1, Landroid/app/NotificationManager;
