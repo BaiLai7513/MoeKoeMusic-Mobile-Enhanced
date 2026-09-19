@@ -6,6 +6,8 @@
 # static fields
 .field private static final MAIN:Landroid/os/Handler;
 
+.field private static appliedUrl:Ljava/lang/String;
+
 .field private static lastBitmap:Landroid/graphics/Bitmap;
 
 .field private static lastUrl:Ljava/lang/String;
@@ -36,16 +38,19 @@
     .line 22
     sput-object v0, Lcom/moekoe/music/CoverArtLoader;->loadingUrl:Ljava/lang/String;
 
+    .line 23
+    sput-object v0, Lcom/moekoe/music/CoverArtLoader;->appliedUrl:Ljava/lang/String;
+
     return-void
 .end method
 
 .method private constructor <init>()V
     .locals 0
 
-    .line 24
+    .line 25
     invoke-direct {p0}, Ljava/lang/Object;-><init>()V
 
-    .line 25
+    .line 26
     return-void
 .end method
 
@@ -71,12 +76,21 @@
     .locals 0
 
     .line 18
+    sput-object p0, Lcom/moekoe/music/CoverArtLoader;->appliedUrl:Ljava/lang/String;
+
+    return-object p0
+.end method
+
+.method static synthetic access$302(Ljava/lang/String;)Ljava/lang/String;
+    .locals 0
+
+    .line 18
     sput-object p0, Lcom/moekoe/music/CoverArtLoader;->loadingUrl:Ljava/lang/String;
 
     return-object p0
 .end method
 
-.method static synthetic access$300(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
+.method static synthetic access$400(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
     .locals 0
 
     .line 18
@@ -85,7 +99,7 @@
     return-void
 .end method
 
-.method static synthetic access$400()Landroid/os/Handler;
+.method static synthetic access$500()Landroid/os/Handler;
     .locals 1
 
     .line 18
@@ -97,14 +111,14 @@
 .method private static apply(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
     .locals 4
 
-    .line 92
+    .line 97
     if-eqz p0, :cond_3
 
     if-nez p1, :cond_0
 
     goto :goto_2
 
-    .line 96
+    .line 101
     :cond_0
     const-string v0, ""
 
@@ -112,11 +126,11 @@
 
     move-object p2, v0
 
-    .line 97
+    .line 102
     :cond_1
     nop
 
-    .line 98
+    .line 103
     :try_start_0
     const-string v1, " - "
 
@@ -124,24 +138,24 @@
 
     move-result v1
 
-    .line 99
+    .line 104
     const/4 v2, 0x0
 
     if-lez v1, :cond_2
 
-    .line 100
+    .line 105
     add-int/lit8 v0, v1, 0x3
 
     invoke-virtual {p2, v0}, Ljava/lang/String;->substring(I)Ljava/lang/String;
 
     move-result-object v0
 
-    .line 101
+    .line 106
     invoke-virtual {p2, v2, v1}, Ljava/lang/String;->substring(II)Ljava/lang/String;
 
     move-result-object p2
 
-    .line 103
+    .line 108
     :cond_2
     new-instance v1, Landroid/media/MediaMetadata$Builder;
 
@@ -149,40 +163,47 @@
 
     const-string v3, "android.media.metadata.TITLE"
 
-    .line 104
+    .line 109
     invoke-virtual {v1, v3, p2}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
     const-string v1, "android.media.metadata.ARTIST"
 
-    .line 105
+    .line 110
     invoke-virtual {p2, v1, v0}, Landroid/media/MediaMetadata$Builder;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
     const-string v0, "android.media.metadata.DURATION"
 
-    .line 106
+    .line 111
     invoke-virtual {p2, v0, p3, p4}, Landroid/media/MediaMetadata$Builder;->putLong(Ljava/lang/String;J)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
     const-string p3, "android.media.metadata.ALBUM_ART"
 
-    .line 107
+    .line 112
     invoke-virtual {p2, p3, p1}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
     const-string p3, "android.media.metadata.ART"
 
-    .line 108
+    .line 113
     invoke-virtual {p2, p3, p1}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
 
     move-result-object p2
 
-    .line 109
+    const-string p3, "android.media.metadata.DISPLAY_ICON"
+
+    .line 114
+    invoke-virtual {p2, p3, p1}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
+
+    move-result-object p2
+
+    .line 115
     invoke-virtual {p2}, Landroid/media/MediaMetadata$Builder;->build()Landroid/media/MediaMetadata;
 
     move-result-object p2
@@ -191,7 +212,7 @@
     :try_end_0
     .catchall {:try_start_0 .. :try_end_0} :catchall_1
 
-    .line 111
+    .line 117
     :try_start_1
     const-string p0, "com.moekoe.music.MusicForegroundService"
 
@@ -199,7 +220,7 @@
 
     move-result-object p0
 
-    .line 112
+    .line 118
     const-string p2, "setArtworkBitmap"
 
     const/4 p3, 0x1
@@ -224,26 +245,26 @@
     :try_end_1
     .catchall {:try_start_1 .. :try_end_1} :catchall_0
 
-    .line 114
+    .line 120
     goto :goto_0
 
-    .line 113
+    .line 119
     :catchall_0
     move-exception p0
 
-    .line 116
+    .line 122
     :goto_0
     goto :goto_1
 
-    .line 115
+    .line 121
     :catchall_1
     move-exception p0
 
-    .line 117
+    .line 123
     :goto_1
     return-void
 
-    .line 93
+    .line 98
     :cond_3
     :goto_2
     return-void
@@ -252,13 +273,13 @@
 .method public static load(Landroid/media/session/MediaSession;Ljava/lang/String;Ljava/lang/String;J)V
     .locals 7
 
-    .line 29
+    .line 30
     if-nez p0, :cond_0
 
-    .line 30
+    .line 31
     return-void
 
-    .line 32
+    .line 33
     :cond_0
     if-nez p1, :cond_1
 
@@ -274,17 +295,17 @@
     :goto_0
     move-object v1, p1
 
-    .line 33
+    .line 34
     invoke-virtual {v1}, Ljava/lang/String;->length()I
 
     move-result p1
 
     if-nez p1, :cond_2
 
-    .line 34
+    .line 35
     return-void
 
-    .line 36
+    .line 37
     :cond_2
     sget-object p1, Lcom/moekoe/music/CoverArtLoader;->lastUrl:Ljava/lang/String;
 
@@ -292,38 +313,51 @@
 
     move-result p1
 
-    if-eqz p1, :cond_3
+    if-eqz p1, :cond_4
 
     sget-object p1, Lcom/moekoe/music/CoverArtLoader;->lastBitmap:Landroid/graphics/Bitmap;
 
-    if-eqz p1, :cond_3
+    if-eqz p1, :cond_4
 
-    .line 37
+    .line 38
+    sget-object p1, Lcom/moekoe/music/CoverArtLoader;->appliedUrl:Ljava/lang/String;
+
+    invoke-virtual {v1, p1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+
+    move-result p1
+
+    if-nez p1, :cond_3
+
+    .line 39
     sget-object p1, Lcom/moekoe/music/CoverArtLoader;->lastBitmap:Landroid/graphics/Bitmap;
 
     invoke-static {p0, p1, p2, p3, p4}, Lcom/moekoe/music/CoverArtLoader;->apply(Landroid/media/session/MediaSession;Landroid/graphics/Bitmap;Ljava/lang/String;J)V
 
-    .line 38
+    .line 40
+    sput-object v1, Lcom/moekoe/music/CoverArtLoader;->appliedUrl:Ljava/lang/String;
+
+    .line 42
+    :cond_3
     return-void
 
-    .line 40
-    :cond_3
+    .line 44
+    :cond_4
     sget-object p1, Lcom/moekoe/music/CoverArtLoader;->loadingUrl:Ljava/lang/String;
 
     invoke-virtual {v1, p1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
 
     move-result p1
 
-    if-eqz p1, :cond_4
+    if-eqz p1, :cond_5
 
-    .line 41
+    .line 45
     return-void
 
-    .line 43
-    :cond_4
+    .line 47
+    :cond_5
     sput-object v1, Lcom/moekoe/music/CoverArtLoader;->loadingUrl:Ljava/lang/String;
 
-    .line 44
+    .line 48
     new-instance p1, Ljava/lang/Thread;
 
     new-instance v6, Lcom/moekoe/music/CoverArtLoader$1;
@@ -342,9 +376,9 @@
 
     invoke-direct {p1, v6, p0}, Ljava/lang/Thread;-><init>(Ljava/lang/Runnable;Ljava/lang/String;)V
 
-    .line 87
+    .line 92
     invoke-virtual {p1}, Ljava/lang/Thread;->start()V
 
-    .line 88
+    .line 93
     return-void
 .end method

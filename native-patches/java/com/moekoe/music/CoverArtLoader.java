@@ -20,6 +20,7 @@ public final class CoverArtLoader {
     private static String lastUrl = "";
     private static Bitmap lastBitmap;
     private static String loadingUrl = "";
+    private static String appliedUrl = "";
 
     private CoverArtLoader() {
     }
@@ -34,7 +35,10 @@ public final class CoverArtLoader {
             return;
         }
         if (url.equals(lastUrl) && lastBitmap != null) {
-            apply(session, lastBitmap, titleWithArtist, durationMs);
+            if (!url.equals(appliedUrl)) {
+                apply(session, lastBitmap, titleWithArtist, durationMs);
+                appliedUrl = url;
+            }
             return;
         }
         if (url.equals(loadingUrl)) {
@@ -75,6 +79,7 @@ public final class CoverArtLoader {
                 if (result != null) {
                     lastUrl = url;
                     lastBitmap = result;
+                    appliedUrl = url;
                 }
                 loadingUrl = "";
                 MAIN.post(new Runnable() {
@@ -105,7 +110,8 @@ public final class CoverArtLoader {
                     .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
                     .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
                     .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
-                    .putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap);
+                    .putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap)
+                    .putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, bitmap);
             session.setMetadata(builder.build());
             try {
                 Class<?> service = Class.forName("com.moekoe.music.MusicForegroundService");

@@ -36,7 +36,7 @@
         }
     .end annotation
 
-    .line 44
+    .line 48
     iput-object p1, p0, Lcom/moekoe/music/CoverArtLoader$1;->val$url:Ljava/lang/String;
 
     iput-object p2, p0, Lcom/moekoe/music/CoverArtLoader$1;->val$session:Landroid/media/session/MediaSession;
@@ -55,16 +55,16 @@
 .method public run()V
     .locals 5
 
-    .line 47
-    nop
-
-    .line 48
-    nop
-
-    .line 49
-    nop
-
     .line 51
+    nop
+
+    .line 52
+    nop
+
+    .line 53
+    nop
+
+    .line 55
     const/4 v0, 0x0
 
     :try_start_0
@@ -74,7 +74,7 @@
 
     invoke-direct {v1, v2}, Ljava/net/URL;-><init>(Ljava/lang/String;)V
 
-    .line 52
+    .line 56
     invoke-virtual {v1}, Ljava/net/URL;->openConnection()Ljava/net/URLConnection;
 
     move-result-object v1
@@ -83,38 +83,38 @@
     :try_end_0
     .catchall {:try_start_0 .. :try_end_0} :catchall_4
 
-    .line 53
+    .line 57
     const/16 v2, 0x1388
 
     :try_start_1
     invoke-virtual {v1, v2}, Ljava/net/HttpURLConnection;->setConnectTimeout(I)V
 
-    .line 54
+    .line 58
     const/16 v2, 0x2710
 
     invoke-virtual {v1, v2}, Ljava/net/HttpURLConnection;->setReadTimeout(I)V
 
-    .line 55
+    .line 59
     const/4 v2, 0x1
 
     invoke-virtual {v1, v2}, Ljava/net/HttpURLConnection;->setInstanceFollowRedirects(Z)V
 
-    .line 56
+    .line 60
     const-string v2, "User-Agent"
 
     const-string v3, "Mozilla/5.0 (Linux; Android) MoeKoeMusic"
 
     invoke-virtual {v1, v2, v3}, Ljava/net/HttpURLConnection;->setRequestProperty(Ljava/lang/String;Ljava/lang/String;)V
 
-    .line 57
+    .line 61
     invoke-virtual {v1}, Ljava/net/HttpURLConnection;->connect()V
 
-    .line 58
+    .line 62
     invoke-virtual {v1}, Ljava/net/HttpURLConnection;->getResponseCode()I
 
     move-result v2
 
-    .line 59
+    .line 63
     const/16 v3, 0xc8
 
     if-lt v2, v3, :cond_0
@@ -123,14 +123,14 @@
 
     if-ge v2, v3, :cond_0
 
-    .line 60
+    .line 64
     invoke-virtual {v1}, Ljava/net/HttpURLConnection;->getInputStream()Ljava/io/InputStream;
 
     move-result-object v2
     :try_end_1
     .catchall {:try_start_1 .. :try_end_1} :catchall_3
 
-    .line 61
+    .line 65
     :try_start_2
     invoke-static {v2}, Landroid/graphics/BitmapFactory;->decodeStream(Ljava/io/InputStream;)Landroid/graphics/Bitmap;
 
@@ -146,13 +146,13 @@
 
     goto :goto_0
 
-    .line 63
+    .line 67
     :catchall_0
     move-exception v3
 
     goto :goto_5
 
-    .line 66
+    .line 70
     :cond_0
     move-object v2, v0
 
@@ -166,18 +166,18 @@
 
     goto :goto_1
 
-    .line 67
+    .line 71
     :catchall_1
     move-exception v0
 
     goto :goto_2
 
-    .line 68
+    .line 72
     :cond_1
     :goto_1
     nop
 
-    .line 70
+    .line 74
     :goto_2
     if-eqz v1, :cond_2
 
@@ -188,25 +188,25 @@
 
     goto :goto_3
 
-    .line 71
+    .line 75
     :catchall_2
     move-exception v0
 
-    .line 73
+    .line 77
     goto :goto_4
 
-    .line 72
+    .line 76
     :cond_2
     :goto_3
     nop
 
-    .line 74
+    .line 78
     :goto_4
     move-object v0, v2
 
     goto :goto_9
 
-    .line 63
+    .line 67
     :catchall_3
     move-exception v2
 
@@ -221,7 +221,7 @@
 
     move-object v2, v1
 
-    .line 66
+    .line 70
     :goto_5
     if-eqz v2, :cond_3
 
@@ -232,18 +232,18 @@
 
     goto :goto_6
 
-    .line 67
+    .line 71
     :catchall_5
     move-exception v2
 
     goto :goto_7
 
-    .line 68
+    .line 72
     :cond_3
     :goto_6
     nop
 
-    .line 70
+    .line 74
     :goto_7
     if-eqz v1, :cond_4
 
@@ -254,41 +254,46 @@
 
     goto :goto_8
 
-    .line 71
+    .line 75
     :catchall_6
     move-exception v1
 
-    .line 73
+    .line 77
     goto :goto_9
 
-    .line 72
+    .line 76
     :cond_4
     :goto_8
     nop
 
-    .line 74
+    .line 78
     :goto_9
     nop
 
-    .line 75
+    .line 79
     if-eqz v0, :cond_5
 
-    .line 76
+    .line 80
     iget-object v1, p0, Lcom/moekoe/music/CoverArtLoader$1;->val$url:Ljava/lang/String;
 
     invoke-static {v1}, Lcom/moekoe/music/CoverArtLoader;->access$002(Ljava/lang/String;)Ljava/lang/String;
 
-    .line 77
+    .line 81
     invoke-static {v0}, Lcom/moekoe/music/CoverArtLoader;->access$102(Landroid/graphics/Bitmap;)Landroid/graphics/Bitmap;
 
-    .line 79
-    :cond_5
-    const-string v1, ""
+    .line 82
+    iget-object v1, p0, Lcom/moekoe/music/CoverArtLoader$1;->val$url:Ljava/lang/String;
 
     invoke-static {v1}, Lcom/moekoe/music/CoverArtLoader;->access$202(Ljava/lang/String;)Ljava/lang/String;
 
-    .line 80
-    invoke-static {}, Lcom/moekoe/music/CoverArtLoader;->access$400()Landroid/os/Handler;
+    .line 84
+    :cond_5
+    const-string v1, ""
+
+    invoke-static {v1}, Lcom/moekoe/music/CoverArtLoader;->access$302(Ljava/lang/String;)Ljava/lang/String;
+
+    .line 85
+    invoke-static {}, Lcom/moekoe/music/CoverArtLoader;->access$500()Landroid/os/Handler;
 
     move-result-object v1
 
@@ -298,6 +303,6 @@
 
     invoke-virtual {v1, v2}, Landroid/os/Handler;->post(Ljava/lang/Runnable;)Z
 
-    .line 86
+    .line 91
     return-void
 .end method

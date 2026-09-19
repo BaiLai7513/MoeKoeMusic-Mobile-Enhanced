@@ -255,6 +255,12 @@
 
     move-result-object v13
 
+    const/4 v14, 0x1
+
+    invoke-virtual {v13, v14}, Landroid/app/Notification$Builder;->setVisibility(I)Landroid/app/Notification$Builder;
+
+    move-result-object v13
+
     .line 141
     const v15, 0x1080025
 
@@ -599,6 +605,24 @@
 
     move-result-object v4
 
+    sget-object v3, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
+
+    if-eqz v3, :cond_metadata_art
+
+    const-string v5, "android.media.metadata.ALBUM_ART"
+
+    invoke-virtual {v4, v5, v3}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
+
+    move-result-object v4
+
+    const-string v5, "android.media.metadata.ART"
+
+    invoke-virtual {v4, v5, v3}, Landroid/media/MediaMetadata$Builder;->putBitmap(Ljava/lang/String;Landroid/graphics/Bitmap;)Landroid/media/MediaMetadata$Builder;
+
+    move-result-object v4
+
+    :cond_metadata_art
+
     .line 215
     .local v4, "metadataBuilder":Landroid/media/MediaMetadata$Builder;
     iget-object v5, p0, Lcom/moekoe/music/MusicForegroundService;->mediaSession:Landroid/media/session/MediaSession;
@@ -805,6 +829,24 @@
     .param p5, "title"    # Ljava/lang/String;
     .param p6, "artwork"    # Ljava/lang/String;
 
+    sget-object v0, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
+
+    if-eqz v0, :cond_art_url_changed
+
+    invoke-virtual {v0, p6}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+
+    move-result v0
+
+    if-eqz v0, :cond_art_url_changed
+
+    goto :goto_art_url_set
+
+    :cond_art_url_changed
+    const/4 v0, 0x0
+
+    sput-object v0, Lcom/moekoe/music/MusicForegroundService;->artworkBitmap:Landroid/graphics/Bitmap;
+
+    :goto_art_url_set
     sput-object p6, Lcom/moekoe/music/MusicForegroundService;->artworkUrl:Ljava/lang/String;
 
     sget-object v8, Lcom/moekoe/music/MusicForegroundService;->instance:Lcom/moekoe/music/MusicForegroundService;
