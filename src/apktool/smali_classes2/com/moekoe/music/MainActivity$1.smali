@@ -76,7 +76,7 @@
 
     .line 54
     :cond_1
-    const-string v0, "(function(){function report(){var a=document.querySelector(\'audio\');if(!a)return;var title=document.title||\'\';try{var t=document.querySelector(\'.song-title\');if(t)title=t.textContent.trim();var ar=document.querySelector(\'.player-container .artist\')||document.querySelector(\'.singer-name\');if(ar&&ar.textContent){var artist=ar.textContent.trim();if(artist)title=title+\' - \'+artist;}catch(e){}AndroidMediaBridge.onState(!a.paused&&!a.ended&&a.currentTime>0,((isFinite(a.currentTime)?a.currentTime:0))*1000,((isFinite(a.duration)?a.duration:0))*1000,title);}setInterval(report,1000);document.addEventListener(\'play\',report,true);document.addEventListener(\'pause\',report,true);document.addEventListener(\'timeupdate\',report,true);})();"
+    const-string v0, "(function(){function report(){var a=document.querySelector(\'audio\');if(!a)return;var title=a.getAttribute(\'data-song-name\')||document.title||\'\';try{var artist=a.getAttribute(\'data-song-author\')||\'\';if(!artist){var ar=document.querySelector(\'.player-container .artist\')||document.querySelector(\'.singer-name\');if(ar&&ar.textContent)artist=ar.textContent.trim();}if(artist)title=title+\' - \'+artist;}catch(e){}AndroidMediaBridge.onState(!a.paused&&!a.ended&&a.currentTime>0,((isFinite(a.currentTime)?a.currentTime:0))*1000,((isFinite(a.duration)?a.duration:0))*1000,title);}setInterval(report,1000);document.addEventListener(\'play\',report,true);document.addEventListener(\'pause\',report,true);document.addEventListener(\'timeupdate\',report,true);})();"
 
     const/4 v1, 0x0
 

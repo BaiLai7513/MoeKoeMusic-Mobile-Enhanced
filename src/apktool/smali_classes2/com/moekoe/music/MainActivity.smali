@@ -14,7 +14,7 @@
 # static fields
 .field private static final LOCAL_URL:Ljava/lang/String; = "http://127.0.0.1:6521"
 
-.field private static final MEDIA_OBSERVER_JS:Ljava/lang/String; = "(function(){function report(){var a=document.querySelector(\'audio\');if(!a)return;var title=document.title||\'\';try{var t=document.querySelector(\'.song-name,.song-title,.music-name,.player-song-title\');if(t)title=t.textContent.trim();}catch(e){}AndroidMediaBridge.onState(!a.paused&&!a.ended&&a.currentTime>0,((isFinite(a.currentTime)?a.currentTime:0))*1000,((isFinite(a.duration)?a.duration:0))*1000,title);}setInterval(report,1000);document.addEventListener(\'play\',report,true);document.addEventListener(\'pause\',report,true);document.addEventListener(\'timeupdate\',report,true);})();"
+.field private static final MEDIA_OBSERVER_JS:Ljava/lang/String; = "(function(){function report(){var a=document.querySelector(\'audio\');if(!a)return;var title=a.getAttribute(\'data-song-name\')||document.title||\'\';try{var artist=a.getAttribute(\'data-song-author\')||\'\';if(!artist){var ar=document.querySelector(\'.player-container .artist\')||document.querySelector(\'.singer-name\');if(ar&&ar.textContent)artist=ar.textContent.trim();}if(artist)title=title+\' - \'+artist;}catch(e){}AndroidMediaBridge.onState(!a.paused&&!a.ended&&a.currentTime>0,((isFinite(a.currentTime)?a.currentTime:0))*1000,((isFinite(a.duration)?a.duration:0))*1000,title);}setInterval(report,1000);document.addEventListener(\'play\',report,true);document.addEventListener(\'pause\',report,true);document.addEventListener(\'timeupdate\',report,true);})();"
 
 .field private static final TAG:Ljava/lang/String; = "MoeKoeMain"
 
