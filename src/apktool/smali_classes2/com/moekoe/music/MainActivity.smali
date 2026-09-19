@@ -775,6 +775,8 @@
 
     invoke-static {v1}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V
 
+    invoke-static {p0}, Lcom/moekoe/music/BackGestureHelper;->register(Landroid/app/Activity;)V
+
     .line 37
     new-instance v0, Landroid/webkit/WebView;
 
