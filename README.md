@@ -78,4 +78,6 @@ bash scripts/build.sh
 - 原 MoeKoeMusic：<https://github.com/MoeKoeMusic/MoeKoeMusic>
 - Android Mobile 参考：<https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile>
 
+## BUG目前存在内存泄露BUG暂不发布realsea
+
 
