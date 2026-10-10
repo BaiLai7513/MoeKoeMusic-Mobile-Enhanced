@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, View, XStack, YStack } from 'tamagui';
@@ -12,7 +12,18 @@ import { ACCENT_PRESETS, getPalette, type AccentPreset } from '@/constants/accen
 import { MaxContentWidth, type SchemeName } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
 import { libraryActions } from '@/features/library/store';
-import { settingsActions, useSettings, type ThemeMode } from '@/features/settings/store';
+import { AUDIO_QUALITIES, AUDIO_QUALITY_LABELS } from '@/features/player/audio-quality';
+import {
+  settingsActions,
+  useAudioQuality,
+  useSettings,
+  type ThemeMode,
+} from '@/features/settings/store';
+import {
+  isBatteryOptimizationSupported,
+  isIgnoringBatteryOptimizations,
+  requestIgnoreBatteryOptimizations,
+} from '@/features/system/battery';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { clearApiSession } from '@/lib/kugou-api';
 
@@ -136,12 +147,65 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { themeMode, accentId } = useSettings();
+  const quality = useAudioQuality();
   const [loggedIn, setLoggedIn] = useState(() => isLoggedIn());
   const [aboutVisible, setAboutVisible] = useState(false);
+  const [qualityPickerVisible, setQualityPickerVisible] = useState(false);
+  // null = 还没查出来（避免闪一下错误状态）
+  const [ignoringBattery, setIgnoringBattery] = useState<boolean | null>(null);
+  const [batterySupported] = useState(() => isBatteryOptimizationSupported());
   const version = Constants.expoConfig?.version ?? '';
+
+  useEffect(() => {
+    if (!batterySupported) {
+      return;
+    }
+    let alive = true;
+    void isIgnoringBatteryOptimizations().then((value) => {
+      if (alive) {
+        setIgnoringBattery(value);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [batterySupported]);
 
   function openWeb(url: string, title: string) {
     router.push({ pathname: '/web', params: { url, title } });
+  }
+
+  /**
+   * 后台保活入口。
+   * 系统默认会限制后台应用，导致息屏后播放被打断；引导用户加入「不优化」名单。
+   */
+  function handleBatteryPress() {
+    if (ignoringBattery) {
+      Alert.alert('后台保活', '本应用已加入电池优化白名单，系统不会因为省电限制后台播放。');
+      return;
+    }
+
+    Alert.alert(
+      '后台保活',
+      '系统默认会对后台应用做省电限制，可能导致息屏或切到后台后播放被打断、被清理。\n\n建议把本应用加入「不优化电池」名单。',
+      [
+        { text: '以后再说', style: 'cancel' },
+        {
+          text: '去设置',
+          onPress: () => {
+            void requestIgnoreBatteryOptimizations().then((openedStandardPage) => {
+              // 国产 ROM 常拦截标准授权页，回退到应用详情页时需要告诉用户怎么手动设置
+              if (!openedStandardPage) {
+                Alert.alert(
+                  '需要手动设置',
+                  '当前系统未提供标准授权页，已打开应用详情页。\n请在「电池 / 耗电管理 / 省电策略」中把本应用设为「不限制」或「允许后台运行」。'
+                );
+              }
+            });
+          },
+        },
+      ]
+    );
   }
 
   function confirmLogout() {
@@ -233,6 +297,27 @@ export default function SettingsScreen() {
           </YStack>
 
           <YStack gap={10}>
+            <SectionHeader title="播放" />
+            <YStack
+              backgroundColor={palette.card}
+              borderRadius={20}
+              borderWidth={StyleSheet.hairlineWidth}
+              borderColor={palette.border}
+              paddingVertical={4}
+              overflow="hidden">
+              <SettingsRow
+                label="默认音质"
+                value={AUDIO_QUALITY_LABELS[quality]}
+                icon="musical-notes-outline"
+                onPress={() => setQualityPickerVisible(true)}
+              />
+            </YStack>
+            <Text color={palette.textTertiary} fontSize={11.5} paddingHorizontal={4} lineHeight={16}>
+              优先请求该音质；若账号无权限或该档位拿不到地址，会自动依次降级到可用音质。
+            </Text>
+          </YStack>
+
+          <YStack gap={10}>
             <SectionHeader title="通用" />
             <YStack
               backgroundColor={palette.card}
@@ -241,6 +326,27 @@ export default function SettingsScreen() {
               borderColor={palette.border}
               paddingVertical={4}
               overflow="hidden">
+              {batterySupported ? (
+                <>
+                  <SettingsRow
+                    label="后台保活"
+                    value={
+                      ignoringBattery === null
+                        ? '检测中…'
+                        : ignoringBattery
+                          ? '不受限制'
+                          : '可能被限制'
+                    }
+                    icon="battery-half-outline"
+                    onPress={handleBatteryPress}
+                  />
+                  <View
+                    height={StyleSheet.hairlineWidth}
+                    backgroundColor={palette.border}
+                    marginHorizontal={14}
+                  />
+                </>
+              ) : null}
               <SettingsRow label="版本" value={version ? `v${version}` : '—'} />
               <View
                 height={StyleSheet.hairlineWidth}
@@ -292,6 +398,54 @@ export default function SettingsScreen() {
           ) : null}
         </YStack>
       </ScrollView>
+
+      <Modal
+        visible={qualityPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setQualityPickerVisible(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setQualityPickerVisible(false)}>
+          <Pressable style={styles.modalContainer} onPress={(event) => event.stopPropagation()}>
+            <YStack
+              backgroundColor={palette.card}
+              borderRadius={22}
+              borderWidth={StyleSheet.hairlineWidth}
+              borderColor={palette.border}
+              overflow="hidden"
+              paddingVertical={6}>
+              <Text
+                color={palette.text}
+                fontSize={17}
+                fontWeight="800"
+                textAlign="center"
+                paddingVertical={12}>
+                默认音质
+              </Text>
+              {AUDIO_QUALITIES.map((item) => (
+                <XStack
+                  key={item}
+                  alignItems="center"
+                  height={50}
+                  paddingHorizontal={18}
+                  gap={10}
+                  transition="quickest"
+                  pressStyle={{ opacity: 0.65, backgroundColor: palette.cardAlt }}
+                  onPress={() => {
+                    settingsActions.setQuality(item);
+                    setQualityPickerVisible(false);
+                  }}>
+                  <Text flex={1} color={palette.text} fontSize={14.5}>
+                    {AUDIO_QUALITY_LABELS[item]}
+                  </Text>
+                  {item === quality ? (
+                    <Ionicons name="checkmark" size={19} color={palette.accent} />
+                  ) : null}
+                </XStack>
+              ))}
+            </YStack>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={aboutVisible}

@@ -1,6 +1,11 @@
 import { useSyncExternalStore } from 'react';
 
 import { DEFAULT_ACCENT_ID, isAccentPresetId, type AccentPresetId } from '@/constants/accents';
+import {
+  DEFAULT_AUDIO_QUALITY,
+  isAudioQuality,
+  type AudioQuality,
+} from '@/features/player/audio-quality';
 
 import { readStoredAppearance, writeStoredAppearance } from './storage';
 
@@ -10,12 +15,15 @@ export type SettingsState = {
   hydrated: boolean;
   themeMode: ThemeMode;
   accentId: AccentPresetId;
+  /** 默认播放音质；拿不到该档位时会自动依次降级。 */
+  quality: AudioQuality;
 };
 
 const INITIAL_SETTINGS_STATE: SettingsState = {
   hydrated: false,
   themeMode: 'system',
   accentId: DEFAULT_ACCENT_ID,
+  quality: DEFAULT_AUDIO_QUALITY,
 };
 
 function createStore<T extends object>(initial: T) {
@@ -68,6 +76,8 @@ export function hydrateSettings(): Promise<void> {
       settingsStore.setState({
         themeMode: stored && isThemeMode(stored.themeMode) ? stored.themeMode : 'system',
         accentId: stored && isAccentPresetId(stored.accentId) ? stored.accentId : DEFAULT_ACCENT_ID,
+        quality:
+          stored && isAudioQuality(stored.quality) ? stored.quality : DEFAULT_AUDIO_QUALITY,
         hydrated: true,
       });
     })().catch(() => {
@@ -78,8 +88,8 @@ export function hydrateSettings(): Promise<void> {
 }
 
 function persist() {
-  const { themeMode, accentId } = settingsStore.getState();
-  void writeStoredAppearance({ themeMode, accentId });
+  const { themeMode, accentId, quality } = settingsStore.getState();
+  void writeStoredAppearance({ themeMode, accentId, quality });
 }
 
 export const settingsActions = {
@@ -91,7 +101,19 @@ export const settingsActions = {
     settingsStore.setState({ accentId });
     persist();
   },
+  setQuality(quality: AudioQuality) {
+    settingsStore.setState({ quality });
+    persist();
+  },
 };
+
+/**
+ * 同步读取当前默认音质（供播放内核使用，不走 React hook）。
+ * 设置尚未 hydrate 时返回默认值，不会阻塞播放。
+ */
+export function getCurrentAudioQuality(): AudioQuality {
+  return settingsStore.getState().quality;
+}
 
 export function useSettings(): SettingsState {
   return useSyncExternalStore(
@@ -122,5 +144,13 @@ export function useSettingsHydrated(): boolean {
     settingsStore.subscribe,
     () => settingsStore.getState().hydrated,
     () => INITIAL_SETTINGS_STATE.hydrated
+  );
+}
+
+export function useAudioQuality(): AudioQuality {
+  return useSyncExternalStore(
+    settingsStore.subscribe,
+    () => settingsStore.getState().quality,
+    () => INITIAL_SETTINGS_STATE.quality
   );
 }

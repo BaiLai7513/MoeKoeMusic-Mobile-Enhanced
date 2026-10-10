@@ -1,6 +1,10 @@
 import { mobileApi } from '@/lib/kugou-api';
+import { readCache, writeCache } from '@/lib/offline-cache';
 
 import type { LyricLine, PlayerTrack } from './types';
+
+/** 歌词的离线缓存键前缀（配合歌曲 hash）。 */
+const LYRICS_CACHE_PREFIX = 'lyrics.';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -48,32 +52,58 @@ export function parseLrc(content: string): LyricLine[] {
     .filter((line, index, list) => index === 0 || line.timeMs !== list[index - 1].timeMs || line.text !== list[index - 1].text);
 }
 
-/** 歌词两段式获取：先按 hash 搜索候选，再下载解码为 LRC。 */
+/**
+ * 歌词两段式获取：先按 hash 搜索候选，再下载解码为 LRC。
+ *
+ * 成功时把解析结果缓存起来：断网后再放同一首歌，歌词仍能显示
+ * （主页面上很多歌是重复听的，这个缓存命中率很高）。
+ */
 export async function loadLyricLines(track: PlayerTrack): Promise<LyricLine[]> {
-  const searchResponse = await mobileApi.search_lyric({
-    hash: track.hash,
-    album_audio_id: track.albumAudioId ?? 0,
-  });
-
-  const candidates = toRecords(toRecord(searchResponse.body).candidates);
-  const candidate = candidates[0];
-  if (!candidate || !candidate.id || !candidate.accesskey) {
+  // 本地曲目没有在线歌词库记录，直接返回空，避免一次注定失败的请求
+  if (track.source === 'local') {
     return [];
   }
 
-  const lyricResponse = await mobileApi.lyric({
-    id: candidate.id,
-    accesskey: candidate.accesskey,
-    fmt: 'lrc',
-    decode: true,
-  });
+  const cacheKey = LYRICS_CACHE_PREFIX + track.hash;
 
-  const content = toRecord(lyricResponse.body).decodeContent;
-  if (typeof content !== 'string' || !content.trim()) {
-    return [];
+  try {
+    const searchResponse = await mobileApi.search_lyric({
+      hash: track.hash,
+      album_audio_id: track.albumAudioId ?? 0,
+    });
+
+    const candidates = toRecords(toRecord(searchResponse.body).candidates);
+    const candidate = candidates[0];
+    if (!candidate || !candidate.id || !candidate.accesskey) {
+      return [];
+    }
+
+    const lyricResponse = await mobileApi.lyric({
+      id: candidate.id,
+      accesskey: candidate.accesskey,
+      fmt: 'lrc',
+      decode: true,
+    });
+
+    const content = toRecord(lyricResponse.body).decodeContent;
+    if (typeof content !== 'string' || !content.trim()) {
+      return [];
+    }
+
+    const lines = parseLrc(content);
+    // 只缓存非空结果：空结果可能只是这次没匹配到，缓存住会让之后永远拿不到歌词
+    if (lines.length) {
+      void writeCache(cacheKey, lines);
+    }
+    return lines;
+  } catch (error) {
+    // 断网兜底：用上次解析好的歌词
+    const cached = await readCache<LyricLine[]>(cacheKey);
+    if (cached?.length) {
+      return cached;
+    }
+    throw error;
   }
-
-  return parseLrc(content);
 }
 
 export function findActiveLyricIndex(lines: LyricLine[], positionMs: number): number {

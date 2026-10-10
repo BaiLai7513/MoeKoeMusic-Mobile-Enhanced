@@ -7,10 +7,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { Artwork } from '@/components/ui/artwork';
+import { BatchDownloadBar } from '@/components/ui/batch-download-bar';
 import { MiniPlayer, MINI_PLAYER_HEIGHT } from '@/components/ui/mini-player';
 import { SongListItem } from '@/components/ui/song-list-item';
+import { TouchText } from '@/components/ui/touch-text';
 import { TrackActionsSheet } from '@/components/ui/track-actions-sheet';
 import { MaxContentWidth } from '@/constants/theme';
+import { isDownloadSupported } from '@/features/download/downloader';
+import { useBatchSelect } from '@/features/download/use-batch-select';
 import { playCollection } from '@/features/player/play-collection';
 import { useHasTrack, usePlayer } from '@/features/player/store';
 import type { PlayerTrack } from '@/features/player/types';
@@ -75,6 +79,9 @@ export function TrackCollectionScreen({
     error: '',
   });
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
+  const batch = useBatchSelect();
+  const batchTracks = state.tracks.filter((item) => batch.selectedSet.has(item.hash));
+  const canBatch = isDownloadSupported() && state.tracks.length > 0;
 
   useEffect(() => {
     void loadTracks(1);
@@ -227,21 +234,42 @@ export function TrackCollectionScreen({
             </XStack>
 
             {state.tracks.length ? (
-              <XStack
-                alignSelf="flex-start"
-                alignItems="center"
-                gap={7}
-                height={44}
-                paddingHorizontal={22}
-                borderRadius={22}
-                backgroundColor={palette.accent}
-                transition="quickest"
-                pressStyle={{ opacity: 0.85, scale: 0.97 }}
-                onPress={() => playFrom(0)}>
-                <Ionicons name="play" size={16} color={palette.onAccent} />
-                <Text color={palette.onAccent} fontSize={14.5} fontWeight="700">
-                  播放全部
-                </Text>
+              <XStack alignSelf="flex-start" alignItems="center" gap={10}>
+                <XStack
+                  alignItems="center"
+                  gap={7}
+                  height={44}
+                  paddingHorizontal={22}
+                  borderRadius={22}
+                  backgroundColor={palette.accent}
+                  transition="quickest"
+                  pressStyle={{ opacity: 0.85, scale: 0.97 }}
+                  onPress={() => playFrom(0)}>
+                  <Ionicons name="play" size={16} color={palette.onAccent} />
+                  <Text color={palette.onAccent} fontSize={14.5} fontWeight="700">
+                    播放全部
+                  </Text>
+                </XStack>
+
+                {canBatch && !batch.selectMode ? (
+                  <XStack
+                    alignItems="center"
+                    gap={6}
+                    height={44}
+                    paddingHorizontal={18}
+                    borderRadius={22}
+                    backgroundColor={palette.card}
+                    borderWidth={StyleSheet.hairlineWidth}
+                    borderColor={palette.border}
+                    transition="quickest"
+                    pressStyle={{ opacity: 0.75, scale: 0.97 }}
+                    onPress={batch.enter}>
+                    <Ionicons name="checkmark-circle-outline" size={17} color={palette.text} />
+                    <Text color={palette.text} fontSize={14} fontWeight="600">
+                      多选
+                    </Text>
+                  </XStack>
+                ) : null}
               </XStack>
             ) : null}
           </YStack>
@@ -257,15 +285,9 @@ export function TrackCollectionScreen({
               <Text color={palette.textTertiary} fontSize={13} textAlign="center">
                 {state.error}
               </Text>
-              <Text
-                color={palette.accent}
-                fontSize={14}
-                fontWeight="600"
-                pressStyle={{ opacity: 0.6 }}
-                onPress={() => void loadTracks(1)}
-                suppressHighlighting>
+              <TouchText onPress={() => void loadTracks(1)} fontSize={14}>
                 重试
-              </Text>
+              </TouchText>
             </YStack>
           ) : (
             <YStack alignItems="center" paddingVertical={60} gap={8}>
@@ -290,6 +312,9 @@ export function TrackCollectionScreen({
             active={item.hash === activeHash}
             onPress={() => playFrom(index)}
             onMore={() => setActionTrack(item)}
+            selectMode={batch.selectMode}
+            selected={batch.selectedSet.has(item.hash)}
+            onToggleSelect={() => batch.toggle(item.hash)}
           />
         )}
       />
@@ -304,13 +329,24 @@ export function TrackCollectionScreen({
         track={actionTrack}
       />
 
-      <RNView
-        pointerEvents="box-none"
-        style={[styles.miniDock, { bottom: Math.max(insets.bottom, 12) }]}>
-        <RNView pointerEvents="box-none" style={styles.miniDockInner}>
-          <MiniPlayer />
+      {/* 多选时隐藏 MiniPlayer 并换成批量操作条，避免两个底部浮层打架 */}
+      {batch.selectMode ? (
+        <BatchDownloadBar
+          tracks={batchTracks}
+          allTracks={state.tracks}
+          bottomInset={insets.bottom}
+          onSelectAll={() => batch.toggleAll(state.tracks)}
+          onCancel={batch.exit}
+        />
+      ) : (
+        <RNView
+          pointerEvents="box-none"
+          style={[styles.miniDock, { bottom: Math.max(insets.bottom, 12) }]}>
+          <RNView pointerEvents="box-none" style={styles.miniDockInner}>
+            <MiniPlayer />
+          </RNView>
         </RNView>
-      </RNView>
+      )}
     </View>
   );
 }

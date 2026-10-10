@@ -13,9 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { MiniPlayer, MINI_PLAYER_HEIGHT } from '@/components/ui/mini-player';
+import { BatchDownloadBar } from '@/components/ui/batch-download-bar';
 import {
   AlbumCard,
-  ArtistCard,
   MvCard,
   PlaylistCard,
 } from '@/components/ui/search-result-cards';
@@ -23,6 +23,8 @@ import { SongListItem } from '@/components/ui/song-list-item';
 import { TrackActionsSheet } from '@/components/ui/track-actions-sheet';
 import { MaxContentWidth } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
+import { isDownloadSupported } from '@/features/download/downloader';
+import { useBatchSelect } from '@/features/download/use-batch-select';
 import { playCollection } from '@/features/player/play-collection';
 import { playerActions, useHasTrack, usePlayer } from '@/features/player/store';
 import type { PlayerTrack } from '@/features/player/types';
@@ -30,14 +32,12 @@ import {
   fetchHotKeywords,
   fetchSuggestions,
   searchAlbums,
-  searchArtists,
   searchComplex,
   searchMvs,
   searchPlaylists,
   searchSongs,
   type ComplexSearchResult,
   type SearchAlbum,
-  type SearchArtist,
   type SearchKeyword,
   type SearchMv,
   type SearchPlaylist,
@@ -51,7 +51,6 @@ const SEARCH_TABS: { value: SearchTab; label: string }[] = [
   { value: 'special', label: '歌单' },
   { value: 'album', label: '专辑' },
   { value: 'mv', label: 'MV' },
-  { value: 'author', label: '歌手' },
 ];
 
 /** 各标签的网格列数，与桌面端的网格布局对应（移动端窄屏收窄）。 */
@@ -64,7 +63,16 @@ const TAB_COLUMNS: Record<SearchTab, number> = {
   author: 3,
 };
 
-type ListItem = PlayerTrack | SearchPlaylist | SearchAlbum | SearchArtist | SearchMv;
+type ListItem = PlayerTrack | SearchPlaylist | SearchAlbum | SearchMv;
+
+/**
+ * 顶部分类行的高度。
+ *
+ * 显式钉死而不是靠 padding 撑开：这一行是横向 ScrollView，
+ * 若不固定高度，下方的 FlatList 切换列数时会把它压扁（见使用处的注释）。
+ * 34 ≈ 文字行高(13×1.3) + 上下内边距 + 描边。
+ */
+const TAB_CHIP_HEIGHT = 34;
 
 type ResultsState = {
   keyword: string;
@@ -98,8 +106,12 @@ type FetchPage = {
   hasMore: boolean;
 };
 
+/**
+ * 拉取某个分类的一页结果。
+ * 保留「单曲 / 歌单 / 专辑 / MV」四类（歌手分类已移除）。
+ */
 async function fetchTabPage(
-  tab: Exclude<SearchTab, 'complex'>,
+  tab: 'song' | 'special' | 'album' | 'mv',
   keyword: string,
   page: number
 ): Promise<FetchPage> {
@@ -110,13 +122,18 @@ async function fetchTabPage(
   if (tab === 'special') {
     return searchPlaylists(keyword, page);
   }
-  if (tab === 'album') {
-    return searchAlbums(keyword, page);
-  }
   if (tab === 'mv') {
     return searchMvs(keyword, page);
   }
-  return searchArtists(keyword, page);
+  return searchAlbums(keyword, page);
+}
+
+/** 把任意 tab 收敛到 [fetchTabPage] 支持的四类之一。 */
+function toFetchableTab(tab: SearchTab): 'song' | 'special' | 'album' | 'mv' {
+  if (tab === 'special' || tab === 'album' || tab === 'mv') {
+    return tab;
+  }
+  return 'song';
 }
 
 function itemKey(item: ListItem): string {
@@ -218,7 +235,7 @@ export default function SearchScreen() {
         return;
       }
 
-      const page = await fetchTabPage(tab, trimmed, 1);
+      const page = await fetchTabPage(toFetchableTab(tab), trimmed, 1);
       if (searchId !== searchIdRef.current) {
         return;
       }
@@ -289,7 +306,7 @@ export default function SearchScreen() {
 
     try {
       const nextPage = results.page + 1;
-      const page = await fetchTabPage(tab, keyword, nextPage);
+      const page = await fetchTabPage(toFetchableTab(tab), keyword, nextPage);
       if (searchId !== searchIdRef.current) {
         return;
       }
@@ -344,13 +361,6 @@ export default function SearchScreen() {
     });
   }
 
-  function openArtist(artist: SearchArtist) {
-    router.push({
-      pathname: '/artist/[id]',
-      params: { id: artist.id, name: artist.name, avatar: artist.avatarUrl ?? '' },
-    });
-  }
-
   function openMv(mv: SearchMv) {
     router.push({
       pathname: '/mv/[hash]',
@@ -373,6 +383,13 @@ export default function SearchScreen() {
         results.complex.mvs.length)
   );
   const hasContent = results.tab === 'complex' ? hasComplexContent : results.items.length > 0;
+
+  // 多选只对「单曲」结果开放：歌单/专辑/MV 是卡片，不适用批量下载
+  const batch = useBatchSelect();
+  const batchTracks = results.items.filter(
+    (item): item is PlayerTrack => 'hash' in item && batch.selectedSet.has(item.hash)
+  );
+  const canBatch = isDownloadSupported() && results.tab === 'song' && results.items.length > 0;
 
   /** 从第 index 首开始播放整个“单曲”搜索结果：先播已加载的，后台补齐剩余分页。 */
   function playSongsFrom(index: number) {
@@ -428,20 +445,6 @@ export default function SearchScreen() {
         onScrollBeginDrag={Keyboard.dismiss}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: listBottomInset, gap: 22 }}>
-        {complex.artists.length ? (
-          <YStack gap={10}>
-            <SectionHeader title="歌手" moreTab="author" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {complex.artists.map((artist) => (
-                <ArtistCard key={artist.id} item={artist} width={104} onPress={() => openArtist(artist)} />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
-
         {songs.length ? (
           <YStack gap={6}>
             <SectionHeader title="单曲" total={complex.songsTotal} moreTab="song" />
@@ -467,7 +470,12 @@ export default function SearchScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
               {complex.playlists.map((playlist) => (
-                <PlaylistCard key={playlist.id} item={playlist} width={136} onPress={() => openPlaylist(playlist)} />
+                <PlaylistCard
+                  key={playlist.id}
+                  item={playlist}
+                  width={136}
+                  onPress={() => openPlaylist(playlist)}
+                />
               ))}
             </ScrollView>
           </YStack>
@@ -513,6 +521,9 @@ export default function SearchScreen() {
           active={song.hash === activeHash}
           onPress={() => playSongsFrom(index)}
           onMore={() => setActionTrack(song)}
+          selectMode={batch.selectMode}
+          selected={batch.selectedSet.has(song.hash)}
+          onToggleSelect={() => batch.toggle(song.hash)}
         />
       );
     }
@@ -528,8 +539,7 @@ export default function SearchScreen() {
       const mv = item as SearchMv;
       return <MvCard item={mv} onPress={() => openMv(mv)} />;
     }
-    const artist = item as SearchArtist;
-    return <ArtistCard item={artist} onPress={() => openArtist(artist)} />;
+    return null;
   }
 
   return (
@@ -541,7 +551,7 @@ export default function SearchScreen() {
         flex={1}
         paddingTop={insets.top + 10}
         gap={12}>
-        <XStack alignItems="center" gap={10} paddingHorizontal={16}>
+        <XStack alignItems="center" gap={10} paddingHorizontal={16} flexShrink={0}>
           <XStack
             width={38}
             height={38}
@@ -610,15 +620,25 @@ export default function SearchScreen() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={{ flexGrow: 0 }}
-            contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+            /*
+             * 关键：必须同时钉住高度并禁止收缩。
+             *
+             * 这里原本是 `style={{ flexGrow: 0 }}`，但 RN 的 flexShrink 默认为 1 ——
+             * 切换分类时下方 FlatList 的列数会在 1/2 之间变化，布局压力一变，
+             * 这一行就会被压缩到低于文字所需高度，表现为「顶部分类被压扁、文字被裁」。
+             * 固定高度 + flexShrink: 0 后，无论下方怎么变都不再受影响。
+             */
+            style={{ flexGrow: 0, flexShrink: 0, height: TAB_CHIP_HEIGHT }}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}>
             {SEARCH_TABS.map((tab) => {
               const active = tab.value === activeTab;
               return (
                 <XStack
                   key={tab.value}
+                  height={TAB_CHIP_HEIGHT}
                   paddingHorizontal={15}
-                  paddingVertical={7}
+                  alignItems="center"
+                  justifyContent="center"
                   borderRadius={999}
                   backgroundColor={active ? palette.accent : palette.card}
                   borderWidth={StyleSheet.hairlineWidth}
@@ -739,15 +759,33 @@ export default function SearchScreen() {
                     {results.total > 0 ? `共 ${results.total} 条` : `${results.items.length} 条`}
                   </Text>
                   {results.tab === 'song' ? (
-                    <XStack
-                      alignItems="center"
-                      gap={5}
-                      pressStyle={{ opacity: 0.6 }}
-                      onPress={() => playSongsFrom(0)}>
-                      <Ionicons name="play-circle" size={17} color={palette.accent} />
-                      <Text color={palette.accent} fontSize={13.5} fontWeight="600">
-                        播放全部
-                      </Text>
+                    <XStack alignItems="center" gap={14}>
+                      {canBatch && !batch.selectMode ? (
+                        <XStack
+                          alignItems="center"
+                          gap={5}
+                          pressStyle={{ opacity: 0.6 }}
+                          onPress={batch.enter}>
+                          <Ionicons
+                            name="checkmark-circle-outline"
+                            size={16}
+                            color={palette.textSecondary}
+                          />
+                          <Text color={palette.textSecondary} fontSize={13.5} fontWeight="600">
+                            多选
+                          </Text>
+                        </XStack>
+                      ) : null}
+                      <XStack
+                        alignItems="center"
+                        gap={5}
+                        pressStyle={{ opacity: 0.6 }}
+                        onPress={() => playSongsFrom(0)}>
+                        <Ionicons name="play-circle" size={17} color={palette.accent} />
+                        <Text color={palette.accent} fontSize={13.5} fontWeight="600">
+                          播放全部
+                        </Text>
+                      </XStack>
                     </XStack>
                   ) : null}
                 </XStack>
@@ -805,13 +843,28 @@ export default function SearchScreen() {
         )}
       </YStack>
 
-      <RNView
-        pointerEvents="box-none"
-        style={[styles.miniDock, { bottom: Math.max(insets.bottom, 12) }]}>
-        <RNView pointerEvents="box-none" style={styles.miniDockInner}>
-          <MiniPlayer />
+      {/* 多选时隐藏 MiniPlayer 并换成批量操作条，避免两个底部浮层打架 */}
+      {batch.selectMode ? (
+        <BatchDownloadBar
+          tracks={batchTracks}
+          allTracks={results.items.filter(
+            (item): item is PlayerTrack => 'hash' in item
+          )}
+          bottomInset={insets.bottom}
+          onSelectAll={() =>
+            batch.toggleAll(results.items.filter((item): item is PlayerTrack => 'hash' in item))
+          }
+          onCancel={batch.exit}
+        />
+      ) : (
+        <RNView
+          pointerEvents="box-none"
+          style={[styles.miniDock, { bottom: Math.max(insets.bottom, 12) }]}>
+          <RNView pointerEvents="box-none" style={styles.miniDockInner}>
+            <MiniPlayer />
+          </RNView>
         </RNView>
-      </RNView>
+      )}
 
       <TrackActionsSheet
         open={Boolean(actionTrack)}

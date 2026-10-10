@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
@@ -15,12 +15,19 @@ import {
   isLoggedIn,
   type UserProfile,
 } from '@/features/account/user-api';
-import { signInDailyVip, upgradeDailyVip } from '@/features/account/vip-api';
 import { libraryActions, useLibrary, type LibraryPlaylist } from '@/features/library/store';
+import {
+  scheduleSilentVipClaim,
+  VIP_CLAIMED_TOAST,
+} from '@/features/account/vip-silent-claim';
 import { MaxContentWidth } from '@/constants/theme';
 import { useDockContentInset } from '@/hooks/use-dock-inset';
 import { usePalette } from '@/hooks/use-palette';
 import { bootstrapMobileApi } from '@/lib/kugou-api';
+import { readCache, writeCache } from '@/lib/offline-cache';
+
+/** 个人资料的离线缓存键。 */
+const PROFILE_CACHE_KEY = 'profile';
 
 type ScreenState = {
   checking: boolean;
@@ -71,7 +78,7 @@ function PlaylistRow({
   );
 }
 
-/** 个人中心顶部"我喜欢/我的云盘"入口卡片。 */
+/** 个人中心顶部的入口卡片（当前只保留「我喜欢」；云盘入口已随精简移除）。 */
 function QuickEntryCard({
   icon,
   gradient,
@@ -202,56 +209,10 @@ export default function MeScreen() {
     error: '',
   });
   const [createOpen, setCreateOpen] = useState(false);
-  const [signingIn, setSigningIn] = useState(false);
   // 创建的歌单默认展开，收藏的歌单默认收起
   const [createdOpen, setCreatedOpen] = useState(true);
   const [collectedOpen, setCollectedOpen] = useState(false);
   const library = useLibrary();
-
-  const handleUpgrade = useCallback(async () => {
-    setSigningIn(true);
-    try {
-      const result = await upgradeDailyVip();
-      showToast(result.message);
-      if (!result.alreadyDone) {
-        void load('refresh');
-      }
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '升级失败，请稍后重试');
-    } finally {
-      setSigningIn(false);
-    }
-    // load 在下方定义，用 ref 稳定引用即可。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleSignIn = useCallback(async () => {
-    if (signingIn) {
-      return;
-    }
-    setSigningIn(true);
-    try {
-      const result = await signInDailyVip();
-      if (!result.alreadyDone) {
-        void load('refresh');
-      }
-      if (result.canUpgrade) {
-        // 与桌面端一致：签到完成后询问是否升级概念版 VIP（更高音质），一天仅限一次
-        Alert.alert(result.message, '是否继续升级至概念版 VIP，享受更高音质？', [
-          { text: '暂不', style: 'cancel' },
-          { text: '升级', onPress: () => void handleUpgrade() },
-        ]);
-      } else {
-        showToast(result.message);
-      }
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '签到失败，请稍后重试');
-    } finally {
-      setSigningIn(false);
-    }
-    // load 在下方定义，用 ref 稳定引用即可；此处依赖 signingIn 足够。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signingIn, handleUpgrade]);
 
   const load = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     const requestId = ++requestIdRef.current;
@@ -294,6 +255,9 @@ export default function MeScreen() {
         throw profileResult.reason;
       }
 
+      // 记下最后一次成功的资料，供离线时展示
+      void writeCache(PROFILE_CACHE_KEY, profileResult.value);
+
       startTransition(() => {
         setState({
           checking: false,
@@ -303,15 +267,36 @@ export default function MeScreen() {
           error: '',
         });
       });
+
+      // 已登录且拿到了资料：这是天然能观察到 VIP 是否过期的时机。
+      // 过期则延时静默补领（内部有去重，重复调用无副作用）。
+      scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
+
+      // 断网时用上次成功的资料兜底：登录态本身是本地的（token 在 SecureStore），
+      // 不该因为拉不到昵称头像就整页变成错误态。
+      const cached = state.profile ? null : await readCache<UserProfile>(PROFILE_CACHE_KEY);
+      if (requestId !== requestIdRef.current) return;
+
       startTransition(() => {
-        setState((current) => ({
-          ...current,
-          checking: false,
-          refreshing: false,
-          error: error instanceof Error ? error.message : '加载失败',
-        }));
+        setState((current) => {
+          const shown = current.profile ?? cached;
+          return {
+            ...current,
+            checking: false,
+            refreshing: false,
+            loggedIn: current.loggedIn || Boolean(cached),
+            profile: shown,
+            // 有内容可展示时用温和文案：资料已经显示出来了，
+            // 再甩一句「获取用户信息失败」会让用户以为页面坏了。
+            error: shown
+              ? '网络不可用，正在显示上次加载的资料'
+              : error instanceof Error
+                ? error.message
+                : '加载失败',
+          };
+        });
       });
     }
   }, []);
@@ -469,30 +454,6 @@ export default function MeScreen() {
                     </YStack>
                   ))}
                 </XStack>
-
-                <XStack
-                  marginTop={12}
-                  alignItems="center"
-                  justifyContent="center"
-                  gap={7}
-                  height={44}
-                  borderRadius={16}
-                  backgroundColor={palette.vipSoft}
-                  borderWidth={StyleSheet.hairlineWidth}
-                  borderColor={palette.vip}
-                  opacity={signingIn ? 0.6 : 1}
-                  transition="quickest"
-                  pressStyle={{ opacity: 0.75, scale: 0.99 }}
-                  onPress={() => void handleSignIn()}>
-                  {signingIn ? (
-                    <Spinner size="small" color={palette.vip} />
-                  ) : (
-                    <Ionicons name="gift" size={16} color={palette.vip} />
-                  )}
-                  <Text color={palette.vip} fontSize={14} fontWeight="700">
-                    {signingIn ? '签到中…' : '签到领取 VIP'}
-                  </Text>
-                </XStack>
               </YStack>
 
               <XStack gap={10}>
@@ -510,11 +471,11 @@ export default function MeScreen() {
                   }}
                 />
                 <QuickEntryCard
-                  icon="cloud"
+                  icon="phone-portrait-outline"
                   gradient={['#5EA8FF', '#3E7BFA']}
-                  title="我的云盘"
-                  subtitle="上传的音乐"
-                  onPress={() => router.push('/cloud')}
+                  title="本地音乐"
+                  subtitle="手机里的歌曲"
+                  onPress={() => router.push('/local')}
                 />
               </XStack>
 

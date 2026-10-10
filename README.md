@@ -1,176 +1,152 @@
 <div align="center">
 
-<img src="assets/images/icon.png" width="240" alt="MoeKoe Music" />
+<img src="assets/images/icon.png" width="200" alt="MoeKoe Music" />
 
-# MoeKoe Music Mobile
+# MoeKoe Music Mobile · 个人增强版
 
-一款开源、简洁、高颜值的第三方酷狗音乐移动端播放器
+一个自用的第三方酷狗音乐安卓客户端，在官方 [MoeKoeMusic-Mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile) 基础上做的个人化改造。
 
-基于 Expo / React Native 构建，是 [MoeKoeMusic](https://github.com/iAJue/MoeKoeMusic) 桌面版的移动端实现
+**仅供个人学习与技术研究使用。**
 
-<a href="https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile" target="blank"><strong>🌎 GitHub仓库</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile/releases" target="blank"><strong>📦️ 下载安装包</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="https://MoeJue.cn" target="blank"><strong>💬 访问博客</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="https://Music.MoeKoe.cn" target="blank"><strong>🏠 项目主页</strong></a>
-
-<a href="https://github.com/iAJue"><img src="https://img.shields.io/badge/%F0%9F%8E%89_Create_by_iAJue-with_Love_%E2%9D%A4-pink?style=flat-square" /></a>
-
-[![Expo SDK](https://img.shields.io/badge/Expo-SDK%2057-000020?logo=expo&logoColor=white)](https://expo.dev/)
 [![React Native](https://img.shields.io/badge/React%20Native-0.86-61DAFB?logo=react&logoColor=white)](https://reactnative.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Expo SDK](https://img.shields.io/badge/Expo-SDK%2057-000020?logo=expo&logoColor=white)](https://expo.dev/)
+[![Platform](https://img.shields.io/badge/Platform-Android%20arm64--v8a-3DDC84?logo=android&logoColor=white)](#)
 [![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20Android-lightgrey)](#)
 
 </div>
 
 ---
 
-## ✨ 特性
+## 这是什么
 
-- 🎵 **无需自建服务器** — 酷狗 API 适配层直接直连官方，开箱即用，不依赖外部 API 地址
-- 🏠 **首页推荐** — 每日推荐、精选歌单、排行榜
-- 🧭 **发现页** — 分类歌单、新歌速递等内容探索
-- 🔍 **搜索** — 快速检索歌曲、歌单、专辑
-- 📀 **歌单 / 专辑 / 排行榜** — 完整的详情页与曲目列表
-- 🎧 **播放器** — 滚动歌词、播放队列、迷你播放条（MiniPlayer）、后台播放
-- 🎚️ **音质检测** — 自动探测并选择可用音质
-- 📱 **手机号登录** — 同步酷狗账号的收藏与歌单
-- 🌗 **深色模式** — 跟随系统自动切换明暗主题
+官方移动端很好用，但**播放内核**和**离线能力**上有些我想改的地方。这个版本针对以下问题做了重做：
 
-## 📝 Todo List
+| 问题 | 这里怎么解决 |
+|---|---|
+| 后台容易被杀、音频解码 CPU 偏高 | 换成 **media3 ExoPlayer** + `MediaSessionService`（实测后台播放 CPU 从 ~22% 降到 **3.4%**） |
+| 切歌单不生效、播放状态对不上 | 重做队列与原生播放列表的同步（两道守卫防串曲） |
+| 没网时整个 App 卡死 | 请求超时 + **多级离线缓存**（资料 / 歌单 / 音频 / 歌词 / 封面） |
+| 部分歌曲被判「无版权」放不了 | 修正直链接口的调用参数（详见下文） |
+| 只能在线听 | 系统下载器下载 + 本地扫描 + 播过的歌自动落盘、断网可重放 |
 
-- [x] 首页每日推荐 / 精选歌单 / 排行榜
-- [x] 发现页分类内容浏览
-- [x] 搜索歌曲、歌单、专辑
-- [x] 歌单 / 专辑 / 排行榜详情页
-- [x] 播放器：滚动歌词、播放队列、迷你播放条、后台播放
-- [x] 音质检测与自动选择
-- [x] 手机号登录
-- [x] 账号密码登录
-- [x] 扫码登录(其他设备)
-- [x] 我喜欢 / 收藏同步
-- [x] 用户歌单管理（创建 / 收藏 / 编辑）
-- [ ] 通知栏 / 锁屏播放控制
-- [ ] 歌曲详情浏览
-- [ ] 桌面歌词
-- [ ] 听歌识曲
-- [ ] 平板与横屏适配
-- [ ] 性能优化
+### 具体改动
 
-## 📸 预览
+- **播放内核重做** —— ExoPlayer + `MediaSessionService`，媒体通知 / 锁屏 / 耳机 / 车机控件完整可用
+- **离线可用** —— 个人资料、歌单、首页推荐、**音频、歌词、封面** 全部本地缓存；断网时能正常浏览并重放听过的歌
+- **播放缓存** —— 以**歌曲 hash** 为缓存键（酷狗直链带时间戳、每次都变，用 URL 当键会永远不命中）
+- **音质可选** —— 128 / 320 / FLAC / Hi-Res 等档位，拿不到自动降级
+- **下载** —— 单曲下载与批量选择下载（走系统 `DownloadManager`，App 被杀也能继续）
+- **本地音乐** —— 扫描手机里的音频并纳入统一播放队列
+- **听歌识曲** —— 保留
+- **每日 VIP 静默领取** —— 检测到 VIP 过期时自动领取（含每日去重，不自动升级套餐）
+- **界面精简** —— 移除「发现」页、云盘、歌手、排行榜等；只留首页（每日推荐 + 搜索）与我的
+- **登录** —— 短信 / 账号密码 / 扫码；验证码冷却落盘持久化（避免反复请求触发风控）
 
-<table>
-  <tr>
-    <td><img src="./images/screen-1.png" alt="Screenshot 1" width="320" /></td>
-    <td><img src="./images/screen-2.png" alt="Screenshot 2" width="320" /></td>
-    <td><img src="./images/screen-3.png" alt="Screenshot 3" width="320" /></td>
-  </tr>
-  <tr>
-    <td><img src="./images/screen-4.png" alt="Screenshot 4" width="320" /></td>
-    <td><img src="./images/screen-5.png" alt="Screenshot 5" width="320" /></td>
-    <td><img src="./images/screen-6.png" alt="Screenshot 6" width="320" /></td>
-  </tr>
-</table>
+---
 
-## 🚀 快速开始
+## 一些值得记录的坑
 
-### 环境要求
+如果你也在做类似的改造，这几条可能会帮你省下几天：
 
-- [Node.js](https://nodejs.org/) ≥ 22
-- [Git](https://git-scm.com/)
-- iOS 模拟器 / Android 模拟器，或安装了开发版客户端的真机
+**1. 播放缓存的键必须是歌曲 hash，不能用 URI。**
+酷狗直链形如 `/202610101256/…`，每次都不同。以 URL 为键 → 缓存目录一直在长，但**永远不命中**。
 
-### 开发运行
+**2. `SimpleCache` 必须进程内单例。**
+它会锁定目录，同目录创建第二个实例直接抛异常（播放服务被系统重建时就会踩到）。
+
+**3. 系统媒体卡片的「上/下一首」取决于 `hasNextMediaItem()`。**
+只在 `onConnect` 里声明命令没用 —— media3 会与 Player 真实能力取交集。**播放列表必须真的有长度**（未解析的用占位 URI）。
+
+**4. 随机模式下要按 `nextMediaItemIndex` 预解析。**
+否则自然播完时必然撞上未解析的占位符，而 ExoPlayer 默认退避重试约 7 秒 —— 观感就是「一首放完卡住」。
+
+**5. `@ReactMethod` 不能用表达式体。**
+`= mainHandler.post { }` 会让返回类型变成 `Boolean`，TurboModule 会当成同步方法并崩溃：
+`TurboModule system assumes returnType == void iff the method is synchronous`。
+
+**6. 请求必须显式设超时。**
+axios 默认 `timeout: 0` = **永不超时**。没网时请求一直挂着、所有页面停在加载态 —— 表现就是「App 彻底歇菜」。
+
+**7. 部分歌曲「无版权」其实是参数问题。**
+`/song/url` 多传 `album_id` / `album_audio_id` 会被判 `status=3`。这两个 ID 来自歌单解析，可能指向别的版本；各音质档位自带的 hash 已足够定位。**只传 `hash` + `quality`** 即可。
+
+**8. `expo prebuild` 会清空 `android/`。**
+所有原生改动都必须走 config plugin；`debug.keystore` 也要一并管理，否则签名变化会让老用户无法覆盖升级。
+
+> 更完整的记录（16 条坑的「现象 → 根因 → 解法」、设计思路、改善方向）见 [开发文档.md](开发文档.md)。
+
+---
+
+## 构建
+
+需要 Node.js、JDK 17+、Android SDK（NDK + CMake）。
 
 ```bash
-# 克隆仓库（包含 api submodule）
-git clone --recurse-submodules https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile.git
-cd MoeKoeMusic-Mobile
-
-# 安装依赖
+# 1. 依赖（注意 --recursive，api/ 是子模块）
+git clone --recursive https://github.com/BaiLai7513/MoeKoeMusic-Mobile-Enhanced.git
+cd MoeKoeMusic-Mobile-Enhanced
 npm install
-npm --prefix api install
+cd api && npm install --omit=dev && cd ..
 
-# 生成移动端 API 入口（api/ 更新后需重新执行）
-npm run generate:mobile-api
+# 2. 生成原生工程（会调用 plugins/ 下的 config plugin 注入原生播放器）
+npx expo prebuild --platform android
 
-# 启动开发服务器
-npx expo start
+# 3. 构建
+cd android && ./gradlew :app:assembleRelease
 ```
 
-> 如果克隆时遗漏了 submodule，可执行 `git submodule update --init` 补齐。
+产物：`android/app/build/outputs/apk/release/app-release.apk`
 
-### 打包构建
+> **为什么要 `--recursive`**：`api/` 是指向 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) 的子模块，直链解析依赖它。
 
-项目使用 [EAS Build](https://docs.expo.dev/build/introduction/)：
+---
 
-```bash
-# 开发版（Development Client）
-eas build --profile development --platform android
+## 安装
 
-# 预览版（内部分发）
-eas build --profile preview --platform android
+从 [Releases](https://github.com/BaiLai7513/MoeKoeMusic-Mobile-Enhanced/releases) 下载 APK 安装即可（需允许「安装未知来源应用」）。
 
-# 生产版
-eas build --profile production --platform all
-```
+**仅支持 Android arm64-v8a。**
 
-## 🏗️ 项目结构
+升级时用 `adb install -r` 或直接覆盖安装即可，**不要卸载** —— 卸载会丢失登录态，且反复登录可能触发酷狗风控。
 
-```
-├── api/                    # KuGouMusicApi（git submodule）
-├── scripts/
-│   └── generate-mobile-api-entry.mjs   # 扫描 api/module 生成移动端入口
-├── src/
-│   ├── app/                # expo-router 路由
-│   │   ├── (tabs)/         # 首页、发现、我的
-│   │   ├── player.tsx      # 全屏播放页
-│   │   ├── search.tsx      # 搜索页
-│   │   ├── login.tsx       # 登录页
-│   │   └── playlist|album|rank/[id].tsx  # 详情页
-│   ├── components/ui/      # 通用 UI 组件（歌词、队列、迷你播放条等）
-│   ├── features/           # 业务模块（player / discover / search / account ...）
-│   ├── lib/kugou-api/      # 应用内 API 运行时适配层
-│   ├── hooks/              # 通用 Hooks
-│   └── constants/          # 主题与布局常量
-├── app.json                # Expo 应用配置
-└── eas.json                # EAS 构建配置
-```
+> ⚠️ **关于签名**：APK 使用 debug 密钥签名，且该密钥已纳入仓库管理以保证跨版本签名一致。**好处**是可以直接覆盖安装、不丢登录态；**代价**是这个密钥是公开的。如果你不接受这一点，请自行替换为独立 release 密钥 —— 但要注意更换签名后**必须先卸载旧版**。
 
-## 🔧 技术栈
+---
 
-| 类别 | 方案 |
-| --- | --- |
-| 框架 | [Expo SDK 57](https://expo.dev/) + [React Native 0.86](https://reactnative.dev/) + React 19（启用 React Compiler） |
-| 路由 | [expo-router](https://docs.expo.dev/router/introduction/)（文件路由 + Typed Routes） |
-| UI | [Tamagui v2](https://tamagui.dev/) |
-| 音频 | [expo-audio](https://docs.expo.dev/versions/latest/sdk/audio/)（支持后台播放） |
-| 动画 | react-native-reanimated 4 |
-| 数据源 | [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)（应用内运行，无需部署） |
+## 致谢
 
-## 🤝 相关项目
+本项目站在这些项目肩上，**核心能力几乎全部来自它们**：
 
-- [MoeKoeMusic](https://github.com/iAJue/MoeKoeMusic) — 桌面版（Windows / macOS / Linux）
-- [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — 酷狗音乐 Node.js API，本项目的数据来源
+| 项目 | 作者 | 本项目用到了什么 |
+|---|---|---|
+| [MoeKoeMusic](https://github.com/iAJue/MoeKoeMusic) | [iAJue](https://github.com/iAJue) | 项目的源头；桌面版是直链解析逻辑的参照实现 |
+| [MoeKoeMusic-Mobile](https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile) | MoeKoeMusic | 本仓库的上游，界面与业务层基础 |
+| [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) | [MakcRe](https://github.com/MakcRe) | 酷狗 API 适配层（`api/` 子模块） |
+| [media3 / ExoPlayer](https://github.com/androidx/media) | AndroidX | 播放内核与媒体会话 |
 
-## 💬 贡献
+感谢原作者们的开源与分享。
 
-欢迎任何形式的贡献！
+---
 
-1. Fork 本仓库
-2. 创建特性分支：`git checkout -b feat/amazing-feature`
-3. 提交更改：`git commit -m 'feat: add amazing feature'`
-4. 推送分支并发起 Pull Request
+## 开源协议
 
-发现问题或有功能建议，请提交 [Issue](https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile/issues)。
+**[GPL-2.0](LICENSE)** —— 继承自上游项目。
 
-## ⚠️ 免责声明
+你可以自由使用、修改、分发，但**衍生作品必须以相同协议开源**。
 
-1. 本项目仅供**学习与技术研究**使用，请勿用于任何商业用途。
-2. 本项目不存储、不分发任何音频资源，所有数据均来自酷狗音乐官方接口。
-3. 音乐版权归酷狗音乐及相应版权方所有，请支持正版音乐。
-4. 使用本项目产生的一切后果由使用者自行承担，与开发者无关。
+---
 
-## 📄 License
+## 免责声明
 
-本项目基于 [GPL-2.0 License](LICENSE) 开源。
+> **请务必阅读以下内容。**
+
+1. **本项目仅供个人学习与技术研究使用**，不得用于任何商业用途。
+2. 本项目**不提供、不存储、不传播任何音乐内容**。所有音乐数据均来自第三方平台（酷狗音乐）的公开接口，**版权归各版权方所有**。
+3. 本项目**与酷狗音乐及其关联公司无任何关系**，未获得其授权、认可或赞助。
+4. 本项目**不含任何破解、绕过付费或侵犯版权的内容**。VIP 相关能力均基于用户**本人账号已有的合法权益**（例如官方活动赠送的每日 VIP），不做任何越权获取。
+5. 使用本项目**可能违反第三方平台的服务条款**，请自行评估风险。**因使用本项目产生的一切后果（包括但不限于账号被限制、数据丢失等）由使用者自行承担**，作者不承担任何责任。
+6. 请于下载后 **24 小时内删除**。如果你喜欢某首音乐，**请通过官方渠道购买或开通会员以支持创作者**。
+7. 本项目按「现状」提供，**不提供任何明示或暗示的担保**。
+8. 如有侵权，请联系删除。
+
+**下载或使用本项目即表示你已阅读、理解并同意上述全部条款。**

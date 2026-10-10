@@ -5,20 +5,20 @@ import { RefreshControl, ScrollView, StyleSheet, useWindowDimensions } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
-import { Artwork } from '@/components/ui/artwork';
-import { BannerCarousel } from '@/components/ui/banner-carousel';
-import { PlaylistCard } from '@/components/ui/playlist-card';
-import { RankCard } from '@/components/ui/rank-card';
 import { SectionHeader } from '@/components/ui/section-header';
 import { SongListItem } from '@/components/ui/song-list-item';
 import { TrackActionsSheet } from '@/components/ui/track-actions-sheet';
-import { MaxContentWidth, WideBreakpoint } from '@/constants/theme';
-import { loadHomeData, type HomeData, type HomeSong } from '@/features/home/load-home-data';
+import { MaxContentWidth } from '@/constants/theme';
+import { loadHomeData, type HomeData } from '@/features/home/load-home-data';
 import { playerActions, usePlayer } from '@/features/player/store';
 import type { PlayerTrack } from '@/features/player/types';
 import { useDockContentInset } from '@/hooks/use-dock-inset';
 import { usePalette } from '@/hooks/use-palette';
 import { formatApiError } from '@/lib/api-parse';
+import { readCache, writeCache } from '@/lib/offline-cache';
+
+/** 首页数据的离线缓存键。 */
+const HOME_CACHE_KEY = 'home';
 
 type ScreenState = {
   homeData: HomeData | null;
@@ -35,83 +35,6 @@ function chunkSongs<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
-}
-
-function HomeSongCard({
-  song,
-  active,
-  width,
-  onPress,
-  onMore,
-}: {
-  song: HomeSong;
-  active: boolean;
-  width: number;
-  onPress: () => void;
-  onMore: () => void;
-}) {
-  const palette = usePalette();
-
-  return (
-    <YStack
-      width={width}
-      gap={8}
-      padding={8}
-      borderRadius={18}
-      backgroundColor={active ? palette.accentSoft : palette.card}
-      borderWidth={StyleSheet.hairlineWidth}
-      borderColor={active ? palette.accentBorder : palette.border}
-      transition="quickest"
-      pressStyle={{ opacity: 0.75, scale: 0.98 }}
-      onPress={onPress}>
-      <View>
-        <Artwork uri={song.coverUrl} radius={14} />
-        <XStack
-          position="absolute"
-          right={7}
-          top={7}
-          width={30}
-          height={30}
-          borderRadius={15}
-          alignItems="center"
-          justifyContent="center"
-          backgroundColor="rgba(12, 12, 18, 0.54)"
-          pressStyle={{ opacity: 0.65, scale: 0.92 }}
-          onPress={(event) => {
-            event.stopPropagation();
-            onMore();
-          }}>
-          <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
-        </XStack>
-        {active ? (
-          <XStack
-            position="absolute"
-            left={7}
-            bottom={7}
-            width={28}
-            height={28}
-            borderRadius={14}
-            alignItems="center"
-            justifyContent="center"
-            backgroundColor="rgba(12, 12, 18, 0.54)">
-            <Ionicons name="pulse" size={15} color="#FFFFFF" />
-          </XStack>
-        ) : null}
-      </View>
-      <YStack gap={3} paddingHorizontal={2}>
-        <Text
-          color={active ? palette.accent : palette.text}
-          fontSize={13.5}
-          fontWeight="700"
-          numberOfLines={1}>
-          {song.title}
-        </Text>
-        <Text color={palette.textSecondary} fontSize={12} numberOfLines={1}>
-          {song.artist || '未知歌手'}
-        </Text>
-      </YStack>
-    </YStack>
-  );
 }
 
 export default function HomeScreen() {
@@ -131,13 +54,6 @@ export default function HomeScreen() {
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
 
   const contentWidth = Math.min(width, MaxContentWidth) - 32;
-  const playlistColumns = contentWidth >= WideBreakpoint ? 3 : 2;
-  const playlistCardWidth = Math.floor(
-    (contentWidth - 14 * (playlistColumns - 1)) / playlistColumns
-  );
-  const bannerWidth = Math.min(contentWidth, 560);
-  const bannerHeight = Math.round(bannerWidth * 0.44);
-  const songCardWidth = Math.min(156, Math.max(136, Math.floor(contentWidth * 0.42)));
 
   async function refreshHome(mode: 'initial' | 'refresh' = 'initial') {
     const requestId = ++requestIdRef.current;
@@ -157,6 +73,9 @@ export default function HomeScreen() {
         return;
       }
 
+      // 记下最后一次成功的结果，供离线时展示
+      void writeCache(HOME_CACHE_KEY, homeData);
+
       startTransition(() => {
         setState({
           homeData,
@@ -171,11 +90,20 @@ export default function HomeScreen() {
       }
 
       const message = formatApiError(error);
+
+      // 网络不可用时用上次成功的数据兜底 —— 否则断网就等于「首页空了」。
+      // 缓存读不到（首次安装就没联过网）才真正显示空态。
+      const cached = state.homeData ? null : await readCache<HomeData>(HOME_CACHE_KEY);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       startTransition(() => {
         setState((current) => ({
-          homeData: current.homeData,
+          homeData: current.homeData ?? cached,
           initialLoading: false,
           refreshing: false,
+          // 有内容可展示时 banner 文案是「正在展示上次内容」，语义正确
           errorMessage: message,
         }));
       });
@@ -298,34 +226,6 @@ export default function HomeScreen() {
           </XStack>
         ) : null}
 
-        {homeData.banners.length ? (
-          <BannerCarousel
-            banners={homeData.banners}
-            bannerWidth={bannerWidth}
-            bannerHeight={bannerHeight}
-            onPressBanner={(banner) => {
-              if (banner.playlistGid) {
-                router.push({
-                  pathname: '/playlist/[id]',
-                  params: {
-                    id: banner.playlistGid,
-                    name: banner.title,
-                    cover: banner.imageUrl ?? '',
-                  },
-                });
-                return;
-              }
-
-              if (banner.linkUrl) {
-                router.push({
-                  pathname: '/web',
-                  params: { url: banner.linkUrl, title: banner.title },
-                });
-              }
-            }}
-          />
-        ) : null}
-
         {homeData.dailySongs.length ? (
           <YStack gap={12}>
             <SectionHeader
@@ -365,81 +265,6 @@ export default function HomeScreen() {
             </ScrollView>
           </YStack>
         ) : null}
-
-        {homeData.playlists.length ? (
-          <YStack gap={12}>
-            <SectionHeader title="推荐歌单" subtitle="此刻大家都在收藏" />
-            <XStack flexWrap="wrap" gap={14}>
-              {homeData.playlists.map((playlist) => (
-                <PlaylistCard
-                  key={playlist.gid}
-                  title={playlist.title}
-                  coverUrl={playlist.coverUrl}
-                  playCountText={playlist.playCountText}
-                  width={playlistCardWidth}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/playlist/[id]',
-                      params: {
-                        id: playlist.gid,
-                        name: playlist.title,
-                        cover: playlist.coverUrl ?? '',
-                      },
-                    })
-                  }
-                />
-              ))}
-            </XStack>
-          </YStack>
-        ) : null}
-
-        {homeData.rankCards.length ? (
-          <YStack gap={12}>
-            <SectionHeader title="排行榜" subtitle="现在大家都在听什么" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rankList}>
-              {homeData.rankCards.map((card) => (
-                <RankCard
-                  key={card.id}
-                  title={card.title}
-                  coverUrl={card.coverUrl}
-                  songs={card.songs}
-                  activeHash={activeHash}
-                  onPressSong={(index) => void playerActions.playTracks(card.songs, index)}
-                  onPlayAll={() => void playerActions.playTracks(card.songs, 0)}
-                />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
-
-        {homeData.newSongs.length ? (
-          <YStack gap={12}>
-            <SectionHeader
-              title="新歌速递"
-              subtitle="最新上架的好声音"
-              actionLabel="播放全部"
-              onAction={() => void playerActions.playTracks(homeData.newSongs, 0)}
-            />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.songCardList}>
-              {homeData.newSongs.map((song, index) => (
-                <HomeSongCard
-                  key={`new-${song.hash}`}
-                  song={song}
-                  active={song.hash === activeHash}
-                  width={songCardWidth}
-                  onPress={() => void playerActions.playTracks(homeData.newSongs, index)}
-                  onMore={() => setActionTrack(song)}
-                />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
       </ScrollView>
 
       <TrackActionsSheet
@@ -463,15 +288,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 22,
   },
-  rankList: {
-    gap: 14,
-    paddingRight: 4,
-  },
   dailyColumns: {
-    gap: 12,
-    paddingRight: 4,
-  },
-  songCardList: {
     gap: 12,
     paddingRight: 4,
   },

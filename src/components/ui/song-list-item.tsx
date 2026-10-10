@@ -14,6 +14,15 @@ type SongListItemProps = {
   onPress: () => void;
   /** 打开歌曲操作面板(收藏/分享等);同时作为长按行为。 */
   onMore?: () => void;
+  /**
+   * 多选模式：进入后点击整行是「勾选/取消」而不是播放，
+   * 右侧的时长与 ⋮ 按钮也会换成勾选框。
+   */
+  selectMode?: boolean;
+  /** 当前是否被勾选（仅多选模式有意义）。 */
+  selected?: boolean;
+  /** 多选模式下点击整行的回调。 */
+  onToggleSelect?: () => void;
 };
 
 export const SongListItem = memo(function SongListItem({
@@ -22,6 +31,9 @@ export const SongListItem = memo(function SongListItem({
   rank,
   onPress,
   onMore,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
 }: SongListItemProps) {
   const palette = usePalette();
 
@@ -32,11 +44,17 @@ export const SongListItem = memo(function SongListItem({
       paddingHorizontal="$3"
       paddingVertical={10}
       borderRadius={16}
-      backgroundColor={active ? palette.accentSoft : 'transparent'}
+      backgroundColor={
+        selectMode && selected
+          ? palette.accentSoft
+          : active && !selectMode
+            ? palette.accentSoft
+            : 'transparent'
+      }
       transition="quickest"
       pressStyle={{ opacity: 0.65, scale: 0.985 }}
-      onPress={onPress}
-      onLongPress={onMore}>
+      onPress={selectMode ? onToggleSelect : onPress}
+      onLongPress={selectMode ? undefined : onMore}>
       {typeof rank === 'number' ? (
         <Text
           width={26}
@@ -54,7 +72,7 @@ export const SongListItem = memo(function SongListItem({
         <XStack alignItems="center" gap={6}>
           <Text
             flexShrink={1}
-            color={active ? palette.accent : palette.text}
+            color={active && !selectMode ? palette.accent : palette.text}
             fontSize={15}
             fontWeight="600"
             numberOfLines={1}>
@@ -95,30 +113,42 @@ export const SongListItem = memo(function SongListItem({
         </Text>
       </YStack>
 
-      {active ? (
-        <Ionicons name="pulse" size={18} color={palette.accent} />
-      ) : track.durationMs ? (
-        <Text color={palette.textTertiary} fontSize={12} fontVariant={['tabular-nums']}>
-          {formatClock(track.durationMs)}
-        </Text>
-      ) : null}
-
-      {onMore ? (
-        <XStack
-          width={30}
-          height={34}
-          marginLeft={-6}
-          alignItems="center"
-          justifyContent="center"
-          transition="quickest"
-          pressStyle={{ opacity: 0.5, scale: 0.9 }}
-          onPress={(event) => {
-            event.stopPropagation();
-            onMore();
-          }}>
-          <Ionicons name="ellipsis-vertical" size={16} color={palette.textTertiary} />
+      {selectMode ? (
+        <XStack width={30} height={34} alignItems="center" justifyContent="center">
+          <Ionicons
+            name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+            size={22}
+            color={selected ? palette.accent : palette.textTertiary}
+          />
         </XStack>
-      ) : null}
+      ) : (
+        <>
+          {active ? (
+            <Ionicons name="pulse" size={18} color={palette.accent} />
+          ) : track.durationMs ? (
+            <Text color={palette.textTertiary} fontSize={12} fontVariant={['tabular-nums']}>
+              {formatClock(track.durationMs)}
+            </Text>
+          ) : null}
+
+          {onMore ? (
+            <XStack
+              width={30}
+              height={34}
+              marginLeft={-6}
+              alignItems="center"
+              justifyContent="center"
+              transition="quickest"
+              pressStyle={{ opacity: 0.5, scale: 0.9 }}
+              onPress={(event) => {
+                event.stopPropagation();
+                onMore();
+              }}>
+              <Ionicons name="ellipsis-vertical" size={16} color={palette.textTertiary} />
+            </XStack>
+          ) : null}
+        </>
+      )}
     </XStack>
   );
 });

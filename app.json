@@ -2,38 +2,14 @@
   "expo": {
     "name": "MoeKoe",
     "slug": "moekoe",
-    "version": "1.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moekoe",
     "userInterfaceStyle": "automatic",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/b40e70cf-7d4b-4a09-8f1d-c17b730e6d96",
-      "requestHeaders": {
-        "expo-channel-name": "production"
-      },
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
-    },
-    "ios": {
-      "bundleIdentifier": "cn.moekoe.music",
-      "buildNumber": "1.1.0",
-      "supportsTablet": false,
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "audio"
-        ],
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
-      }
-    },
     "android": {
-      "package": "cn.moekoe.music",
-      "versionCode": 2,
+      "package": "com.moekoe.music",
+      "versionCode": 10,
       "adaptiveIcon": {
         "backgroundColor": "#F6F9FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -43,14 +19,13 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WAKE_LOCK",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.READ_MEDIA_AUDIO"
       ]
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png",
-      "name": "MoeKoe",
-      "shortName": "MoeKoe"
     },
     "plugins": [
       "expo-router",
@@ -81,17 +56,17 @@
         }
       ],
       "expo-video",
-      "expo-asset"
+      "expo-asset",
+      "./plugins/with-media3",
+      "./plugins/with-gradle-props",
+      "./plugins/with-player"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "b40e70cf-7d4b-4a09-8f1d-c17b730e6d96"
-      }
+      "router": {}
     }
   }
 }

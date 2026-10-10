@@ -34,7 +34,18 @@ export function Artwork({ uri, size, radius = 14, circle = false }: ArtworkProps
 
   return (
     <View style={[styles.frame, frameStyle, { backgroundColor: palette.cardAlt }]}>
-      <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+      <Image
+        source={{ uri }}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        /*
+         * 显式声明缓存策略，不要依赖默认值。
+         * memory-disk = 内存 + 磁盘两级缓存，封面下载一次后断网仍能显示。
+         * 专辑封面在列表里会大量重复出现，磁盘缓存对离线和流量都有明显收益。
+         */
+        cachePolicy="memory-disk"
+        transition={200}
+      />
     </View>
   );
 }

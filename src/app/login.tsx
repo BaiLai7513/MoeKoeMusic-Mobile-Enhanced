@@ -29,6 +29,15 @@ import {
   type KugouAccountOption,
   type SsaChallenge,
 } from '@/features/account/auth';
+import {
+  readSmsCooldownRemaining,
+  SMS_COOLDOWN_SECONDS,
+  startSmsCooldown,
+} from '@/features/account/login-throttle';
+import {
+  scheduleSilentVipClaim,
+  VIP_CLAIMED_TOAST,
+} from '@/features/account/vip-silent-claim';
 import { usePalette } from '@/hooks/use-palette';
 import { pickNumber, pickText, toRecord } from '@/lib/api-parse';
 import { sizedImage } from '@/lib/format';
@@ -517,6 +526,20 @@ export default function LoginScreen() {
     return () => clearTimeout(timer);
   }, [countdown]);
 
+  // 进入登录页时恢复上次未走完的验证码冷却，
+  // 否则杀掉进程重开就能立刻再次请求验证码 —— 那是酷狗风控的高危行为
+  useEffect(() => {
+    let alive = true;
+    void readSmsCooldownRemaining().then((remaining) => {
+      if (alive && remaining > 0) {
+        setCountdown((current) => Math.max(current, remaining));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (mode !== 'qr') {
       return;
@@ -549,10 +572,18 @@ export default function LoginScreen() {
 
   function finishLogin() {
     showToast('登录成功');
+    // 刚拿到会话：立刻排一次 VIP 静默领取检查
+    // （启动时可能还没登录，那时不会消耗会话标记，所以这里能生效）
+    scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
     router.back();
   }
 
   async function handleSendCode() {
+    // 双保险：按钮已被禁用，但直接调用也要挡住（避免任何路径绕过冷却触发风控）
+    if (countdown > 0 || sendingCode || loggingIn) {
+      return;
+    }
+
     const mobile = phone.trim();
     if (!isValidPhone(mobile)) {
       setNotice({ text: '请输入正确的 11 位手机号', tone: 'error' });
@@ -569,7 +600,9 @@ export default function LoginScreen() {
         throw new Error(describeApiFailure(response.body, '验证码发送失败'));
       }
 
-      setCountdown(60);
+      setCountdown(SMS_COOLDOWN_SECONDS);
+      // 落盘：杀掉进程重开也不能立刻再发，否则反复请求会触发酷狗风控
+      void startSmsCooldown();
       setNotice({ text: `验证码已发送至 ${maskPhone(mobile)}`, tone: 'info' });
     } catch (error) {
       setNotice({ text: describeAuthError(error, '验证码发送失败'), tone: 'error' });

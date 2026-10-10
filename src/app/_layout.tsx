@@ -7,7 +7,11 @@ import { useEffect, useMemo } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { hydrateSettings, useSettingsHydrated } from '@/features/settings/store';
-import { ToastHost } from '@/components/ui/toast';
+import {
+  scheduleSilentVipClaim,
+  VIP_CLAIMED_TOAST,
+} from '@/features/account/vip-silent-claim';
+import { showToast, ToastHost } from '@/components/ui/toast';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { tamaguiConfig } from '../../tamagui.config';
 
@@ -37,6 +41,9 @@ export default function RootLayout() {
   useEffect(() => {
     if (hydrated) {
       void SplashScreen.hideAsync().catch(() => undefined);
+      // 启动后检测 VIP 是否已过期，过期则延时静默补领一天畅听 VIP。
+      // 内部有「按天 + 按会话」双重去重，未登录时不消耗标记，登录后仍会触发。
+      scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
     }
   }, [hydrated]);
 
@@ -66,13 +73,19 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen
-            name="rank/[id]"
+            name="album/[id]"
             options={{
               animation: 'slide_from_right',
             }}
           />
           <Stack.Screen
-            name="album/[id]"
+            name="mv/[hash]"
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="local"
             options={{
               animation: 'slide_from_right',
             }}
@@ -89,12 +102,6 @@ export default function RootLayout() {
             options={{
               animation: 'fade_from_bottom',
               animationDuration: 220,
-            }}
-          />
-          <Stack.Screen
-            name="cloud"
-            options={{
-              animation: 'slide_from_right',
             }}
           />
           <Stack.Screen

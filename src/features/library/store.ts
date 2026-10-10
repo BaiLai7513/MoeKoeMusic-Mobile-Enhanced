@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { isLoggedIn } from '@/features/account/user-api';
 import type { PlayerTrack } from '@/features/player/types';
 import { bootstrapMobileApi } from '@/lib/kugou-api';
+import { readCache, writeCache } from '@/lib/offline-cache';
 import {
   addTracksToPlaylist,
   createPlaylist,
@@ -11,6 +12,9 @@ import {
   removeTracksFromPlaylist,
   type LibraryPlaylist,
 } from './library-api';
+
+/** 歌单列表的离线缓存键：断网时至少能列出自己的歌单。 */
+const LIBRARY_CACHE_KEY = 'library.playlists';
 
 export type LibraryStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -100,8 +104,21 @@ async function refreshLibrary(): Promise<void> {
       try {
         const playlists = await fetchLibraryPlaylists();
         setState({ status: 'ready', playlists, error: '' });
+        // 记下最后一次成功的歌单列表，供离线展示
+        void writeCache(LIBRARY_CACHE_KEY, playlists);
         void refreshLikedMap().catch(() => undefined);
       } catch (error) {
+        // 断网兜底：用上次缓存的歌单列表。
+        // 只有当前没有任何数据时才去读缓存，避免把用户刚改过的状态覆盖回旧的。
+        const cached = state.playlists.length
+          ? null
+          : await readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+
+        if (cached?.length) {
+          setState({ status: 'ready', playlists: cached, error: '' });
+          return;
+        }
+
         setState({
           status: state.status === 'ready' ? 'ready' : 'error',
           error: error instanceof Error ? error.message : '歌单加载失败',

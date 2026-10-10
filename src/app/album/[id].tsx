@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useCallback } from 'react';
 
 import { TrackCollectionScreen } from '@/components/ui/track-collection-screen';
-import { fetchAlbumSongs } from '@/features/discover/discover-api';
+import { fetchAlbumSongs } from '@/features/album/album-api';
 
 export default function AlbumScreen() {
   const params = useLocalSearchParams<{

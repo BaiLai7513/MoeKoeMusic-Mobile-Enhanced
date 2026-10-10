@@ -1,6 +1,8 @@
-import { pickNumber, pickStringLike, pickText, toRecord, toRecords } from '@/lib/api-parse';
+import { pickNumber, pickStringLike, pickText, toRecord } from '@/lib/api-parse';
 import { sizedImage } from '@/lib/format';
 import { bootstrapMobileApi, getApiSession, mobileApi } from '@/lib/kugou-api';
+
+import { parseVipStatus } from './vip-api';
 
 export type UserProfile = {
   userid: string;
@@ -13,6 +15,8 @@ export type UserProfile = {
   listenMinutes: number;
   isVip: boolean;
   vipLabel: string;
+  /** VIP 到期时间（毫秒）；0 表示拿不到。静默领取靠它判断是否需要补领。 */
+  vipEndTimeMs: number;
 };
 
 export function isLoggedIn(): boolean {
@@ -36,16 +40,9 @@ export async function fetchUserProfile(): Promise<UserProfile> {
   const data = toRecord(toRecord(detailResult.value.body).data);
   const session = getApiSession();
 
-  let isVip = false;
-  let vipLabel = '';
-  if (vipResult.status === 'fulfilled') {
-    const vipRecords = toRecords(toRecord(toRecord(vipResult.value.body).data).busi_vip);
-    const activeVip = vipRecords.find((item) => pickNumber(item.is_vip) === 1);
-    if (activeVip) {
-      isVip = true;
-      vipLabel = pickText(activeVip.product_type).toLowerCase() === 'svip' ? 'SVIP' : 'VIP';
-    }
-  }
+  // VIP 状态统一由 vip-api 解析，避免两处各写一套字段兜底逻辑
+  const vipStatus =
+    vipResult.status === 'fulfilled' ? parseVipStatus(vipResult.value.body) : null;
 
   return {
     userid: pickStringLike(data.userid, session.userid),
@@ -56,7 +53,8 @@ export async function fetchUserProfile(): Promise<UserProfile> {
     fans: pickNumber(data.fans),
     follows: pickNumber(data.follows),
     listenMinutes: pickNumber(data.duration),
-    isVip,
-    vipLabel,
+    isVip: vipStatus?.isVip ?? false,
+    vipLabel: vipStatus?.vipLabel ?? '',
+    vipEndTimeMs: vipStatus?.endTimeMs ?? 0,
   };
 }

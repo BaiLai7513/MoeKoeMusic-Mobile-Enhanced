@@ -1,9 +1,9 @@
 name: Release
 
+# 仅手动触发：本仓库的 Release 在本地构建并验证后发布，
+# 避免推 tag 时 CI 与手动发布同时产出、互相覆盖。
+# 如需 CI 自动构建，把下面的 tags 触发打开即可。
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:

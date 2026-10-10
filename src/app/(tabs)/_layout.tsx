@@ -9,7 +9,7 @@ import { MiniPlayer } from '@/components/ui/mini-player';
 import { TabBarHeight, TabBarSideMargin } from '@/constants/layout';
 import { useIsDark, usePalette } from '@/hooks/use-palette';
 
-type TabGlyph = 'home' | 'compass' | 'person';
+type TabGlyph = 'home' | 'person';
 
 function TabItem({
   focused,
@@ -85,13 +85,6 @@ export default function TabsLayout() {
           options={{
             title: '首页',
             tabBarIcon: ({ focused }) => <TabItem focused={focused} glyph="home" label="首页" />,
-          }}
-        />
-        <Tabs.Screen
-          name="discover"
-          options={{
-            title: '发现',
-            tabBarIcon: ({ focused }) => <TabItem focused={focused} glyph="compass" label="发现" />,
           }}
         />
         <Tabs.Screen
