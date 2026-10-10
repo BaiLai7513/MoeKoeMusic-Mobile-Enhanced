@@ -33,7 +33,9 @@ const THEME_MODE_OPTIONS = [
   { value: 'dark', label: '深色' },
 ] as const satisfies readonly { value: ThemeMode; label: string }[];
 
-const REPO_URL = 'https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile';
+/** 本仓库（个人增强版），不是上游仓库。 */
+const REPO_URL = 'https://github.com/BaiLai7513/MoeKoeMusic-Mobile-Enhanced';
+/** 上游项目主页；标注为「原项目主页」而不是「官网」，避免误以为本分支是官方版。 */
 const WEBSITE_URL = 'https://music.moekoe.cn';
 const DISCLAIMER = [
   '0. 本程序是酷狗第三方客户端，并非酷狗官方，需要更完善的功能请下载官方客户端体验.',
@@ -364,9 +366,9 @@ export default function SettingsScreen() {
                 marginHorizontal={14}
               />
               <SettingsRow
-                label="官网"
+                label="原项目主页"
                 icon="globe-outline"
-                onPress={() => openWeb(WEBSITE_URL, '官网')}
+                onPress={() => openWeb(WEBSITE_URL, '原项目主页')}
               />
               <View
                 height={StyleSheet.hairlineWidth}
