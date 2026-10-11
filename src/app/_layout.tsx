@@ -7,16 +7,21 @@ import { useEffect, useMemo } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { hydrateSettings, useSettingsHydrated } from '@/features/settings/store';
-import {
-  scheduleSilentVipClaim,
-  VIP_CLAIMED_TOAST,
-} from '@/features/account/vip-silent-claim';
-import { showToast, ToastHost } from '@/components/ui/toast';
+import { syncFromStorage } from '@/features/account/vip-claim-state';
+import { attachVipClaimToPlayback } from '@/features/account/vip-play-claim';
+import { ToastHost } from '@/components/ui/toast';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { tamaguiConfig } from '../../tamagui.config';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 void hydrateSettings();
+// 在模块作用域就把「今天领没领过 VIP」读回来，而不是等「我的」页面挂载再读：
+// 前者能保证按钮首帧就是正确状态，后者会先闪一下再跳成正确文案。
+void syncFromStorage();
+// 自动补领的触发点已经从「启动」移到「开始播放歌曲」：
+// 启动即打领取接口的节奏太像脚本（实测会被判风控），而且用户开 App 不等于要听歌。
+// 这里只做接线，具体节流与接口边界见 vip-play-claim / vip-silent-claim。
+attachVipClaimToPlayback();
 
 export default function RootLayout() {
   const hydrated = useSettingsHydrated();
@@ -41,9 +46,6 @@ export default function RootLayout() {
   useEffect(() => {
     if (hydrated) {
       void SplashScreen.hideAsync().catch(() => undefined);
-      // 启动后检测 VIP 是否已过期，过期则延时静默补领一天畅听 VIP。
-      // 内部有「按天 + 按会话」双重去重，未登录时不消耗标记，登录后仍会触发。
-      scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
     }
   }, [hydrated]);
 

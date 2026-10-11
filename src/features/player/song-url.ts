@@ -36,7 +36,29 @@ function collectUrls(value: unknown): string[] {
   return [];
 }
 
-export class PlaybackUnavailableError extends Error {}
+/**
+ * 「这首歌放不了」的原因。
+ *
+ * 为什么必须是结构化字段，而不是让调用方去匹配 message：VIP 到手后值不值得重试
+ * 完全取决于原因 —— 「缺 VIP」重新解析就可能成功，「无版权」领多少天 VIP 也没用。
+ * 靠中文文案判断的话，哪天改一句提示语，自愈逻辑就会静默失效（而且不会报错）。
+ */
+export type PlaybackUnavailableReason =
+  /** 服务端明确说无版权（status 3）—— 与账号身份无关，重试没有意义。 */
+  | 'copyright'
+  /** 缺 VIP，或服务端没给出更明确的原因 —— 领到 VIP 后值得重新解析一次。 */
+  | 'vip'
+  /** 本地文件地址缺失 —— 与账号无关。 */
+  | 'local-missing';
+
+export class PlaybackUnavailableError extends Error {
+  readonly reason: PlaybackUnavailableReason;
+
+  constructor(message: string, reason: PlaybackUnavailableReason) {
+    super(message);
+    this.reason = reason;
+  }
+}
 
 export type ResolvedSongSource = {
   uri: string;
@@ -155,7 +177,7 @@ export async function resolveSongSource(
   // 本地文件：地址现成的，跳过全部在线解析（也不该受音质设置影响）
   if (track.source === 'local') {
     if (!track.localUri) {
-      throw new PlaybackUnavailableError('本地文件地址缺失，可能已被删除或移动');
+      throw new PlaybackUnavailableError('本地文件地址缺失，可能已被删除或移动', 'local-missing');
     }
     return {
       uri: track.localUri,
@@ -273,10 +295,10 @@ export async function resolveSongSource(
 
   // status 3 = 无版权（服务端明确告知），其余按「需要 VIP / 暂不可播」处理
   if (lastStatus === 3) {
-    throw new PlaybackUnavailableError('这首歌暂无版权，无法播放');
+    throw new PlaybackUnavailableError('这首歌暂无版权，无法播放', 'copyright');
   }
 
-  throw new PlaybackUnavailableError('这首歌需要 VIP 或暂不可播放');
+  throw new PlaybackUnavailableError('这首歌需要 VIP 或暂不可播放', 'vip');
 }
 
 /** 从本地地址里猜扩展名，仅用于展示与下载命名。 */

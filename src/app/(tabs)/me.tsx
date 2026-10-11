@@ -17,9 +17,12 @@ import {
 } from '@/features/account/user-api';
 import { libraryActions, useLibrary, type LibraryPlaylist } from '@/features/library/store';
 import {
-  scheduleSilentVipClaim,
-  VIP_CLAIMED_TOAST,
-} from '@/features/account/vip-silent-claim';
+  claimSvip,
+  markConceptStatus,
+  refreshConceptVip,
+  syncFromStorage,
+  useVipClaimState,
+} from '@/features/account/vip-claim-state';
 import { MaxContentWidth } from '@/constants/theme';
 import { useDockContentInset } from '@/hooks/use-dock-inset';
 import { usePalette } from '@/hooks/use-palette';
@@ -28,6 +31,21 @@ import { readCache, writeCache } from '@/lib/offline-cache';
 
 /** 个人资料的离线缓存键。 */
 const PROFILE_CACHE_KEY = 'profile';
+
+/**
+ * 昵称行右侧 VIP 胶囊的高度。
+ *
+ * 原为 34（与搜索页分类 chip 同值），现按「上下各缩短 1/8」的要求只压高度：
+ * 34 × (1 - 2/8) = 25.5，取整 26。只动高度、不动 paddingHorizontal，
+ * 所以左右内边距天然还是对称的（「两侧均匀」）。
+ *
+ * 从此刻起它与 search.tsx 的 TAB_CHIP_HEIGHT 不再同值 —— 两个控件只是曾经看起来一样高，
+ * 没有任何行为关联，以后调搜索页 chip 的高度时不要再顺手改这里。
+ */
+const VIP_CHIP_HEIGHT = 26;
+
+/** 昵称行与胶囊共用的底部留白：同值才能让两者底边齐平（见 VipChipShell 的 marginBottom 说明）。 */
+const NICKNAME_ROW_PADDING_BOTTOM = 8;
 
 type ScreenState = {
   checking: boolean;
@@ -130,6 +148,145 @@ function QuickEntryCard({
           {subtitle}
         </Text>
       </YStack>
+    </XStack>
+  );
+}
+
+/**
+ * 昵称行右侧的 `SVIP` 胶囊 —— 文案只有三个字母，状态全靠颜色区分：
+ *
+ * | 胶囊 | 可点（金色填充） | 不可点（次级灰） | 点击 |
+ * |---|---|---|---|
+ * | `SVIP` | 概念版已失效 | 概念版有效、或还不知道 | 先领当天畅听 VIP，再升级概念版 |
+ *
+ * 为什么文案短到只有三个字母：这一行还要放昵称与昵称旁的 VIP 徽标，
+ * 「领取SVIP」这类长词会把昵称挤掉。状态区分本来就靠颜色
+ * （可点 = 醒目色填充，不可点 = cardAlt + 次级文字色），文案只负责「这是哪一项」，
+ * 「到底做了什么」交给点击后的 toast 说明。
+ *
+ * 为什么不可点时**仍然响应点击**：胶囊只有三个字母，光看颜色用户不一定知道
+ * 「为什么点不动」。点一下给一句 toast 说明原因，比让按钮像坏掉一样毫无反应好。
+ *
+ * 状态本身不在这里维护，全部来自 vip-claim-state —— 自动补领、「我的」页拉资料、
+ * 以及这里点击的结果写的是同一份，所以不会出现「按钮说没领、状态说领了」。
+ *
+ * 「未知」（conceptValid 为 null）必须是独立的一态，不能并进「失效」：并进去的话，
+ * 概念版有效的用户会先看到一个可点的按钮，白打一次接口。
+ */
+
+/** 胶囊外壳：尺寸/圆角/内边距/字号集中在这里，改尺寸只需要动一处。 */
+function VipChipShell({
+  label,
+  disabled,
+  loading,
+  onPress,
+}: {
+  label: string;
+  disabled: boolean;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+
+  // 配色规则与原来一致：
+  // - 可点用 VIP 金色填充，与紧挨着的昵称 VIP 徽标呼应，一眼能看出「这步跟 VIP 有关」
+  // - 不可点退到 cardAlt + textTertiary（现有次级色），视觉上明确「这里没事可做了」
+  //
+  // 两种态都必须用**不透明**填充：这行文字压在用户头图的照片上，
+  // vipSoft 这种 18% 透明的底色透出照片后，金色文字的对比度会随背景彻底失控。
+  const backgroundColor = disabled ? palette.cardAlt : palette.vip;
+  const borderColor = disabled ? palette.border : palette.vip;
+  const contentColor = disabled ? palette.textTertiary : palette.onAccent;
+
+  return (
+    <XStack
+      height={VIP_CHIP_HEIGHT}
+      flexShrink={0}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={999}
+      overflow="hidden"
+      paddingHorizontal={14}
+      /*
+       * 外层昵称行是 alignItems="flex-end"，用 marginBottom 把胶囊抬起来。
+       *
+       * 这里不能用 paddingBottom：padding 在胶囊内部，只会把文字往上顶，
+       * 胶囊本身仍贴着容器底边，看起来会比昵称低半格。margin 才是真正移动盒子。
+       * 值取 8 与昵称行的 paddingBottom 同值 → 两者底边齐平。
+       */
+      marginBottom={NICKNAME_ROW_PADDING_BOTTOM}
+      backgroundColor={backgroundColor}
+      borderWidth={StyleSheet.hairlineWidth}
+      borderColor={borderColor}
+      opacity={disabled ? 0.9 : loading ? 0.6 : 1}
+      transition="quickest"
+      pressStyle={disabled ? undefined : { opacity: 0.7, scale: 0.97 }}
+      onPress={onPress}>
+      {loading ? (
+        <Spinner size="small" color={contentColor} />
+      ) : (
+        /*
+         * 高度从 34 收到 26 后，13 号字会占掉胶囊一半的高度，视觉上「字把按钮撑满了」；
+         * 更实际的风险是系统字体缩放（Android 常见 1.3×）：13 × 1.3 ≈ 17，
+         * 单行行高可到 23~24，贴着 26 的内高，numberOfLines={1} 容易被裁。
+         * 降到 12 后 12 × 1.3 ≈ 15.6，留出约 6~8 的余量，既不成比例也不裁字。
+         * 宽度侧不受影响：左右 padding 保持 14，文案变短则按钮自然变窄。
+         */
+        <Text color={contentColor} fontSize={12} fontWeight="700" numberOfLines={1}>
+          {label}
+        </Text>
+      )}
+    </XStack>
+  );
+}
+
+/** 胶囊：概念版 SVIP。失效时点击走「领当天畅听 VIP → 升级概念版」这条链路。 */
+function SvipChip() {
+  const { conceptValid, loading } = useVipClaimState();
+  const disabled = conceptValid !== false;
+
+  return (
+    <VipChipShell
+      label="SVIP"
+      disabled={disabled}
+      loading={loading}
+      onPress={() => {
+        if (loading) {
+          return;
+        }
+        if (disabled) {
+          showToast(conceptValid === true ? 'SVIP 有效中' : '正在确认 VIP 状态，请稍后再试');
+          return;
+        }
+        void claimSvip();
+      }}
+    />
+  );
+}
+
+/** 昵称行右侧：`SVIP`（概念版）胶囊。 */
+function VipChipRow() {
+  // 兜底再读一次持久化状态（根布局已经读过，这里是幂等的）：
+  // 万一将来有别的入口不经过根布局渲染这个页面，胶囊也不会显示成初始态。
+  //
+  // 顺序很重要：**先等本地记录落地，再考虑要不要查接口**。本地那份「今天有效」的记录
+  // 一旦被读进来，refreshConceptVip 就会看到「已经有结论」而直接返回 —— 这才是
+  // 「本地记录显示 SVIP 还有效 → 一次请求都不发」成立的地方；反过来的话每次冷启动
+  // 都会先白打一次 /user/vip/detail。
+  useEffect(() => {
+    void syncFromStorage().then(() => refreshConceptVip());
+  }, []);
+
+  /*
+   * 胶囊自带 marginBottom（见 VipChipShell），所以这层只是横向排版：
+   * 外层昵称行是 alignItems="flex-end"，包裹层自然底边对齐，胶囊与昵称底边齐平。
+   *
+   * gap 仍是 6（历史上是两颗胶囊之间的间距）：现在只剩一颗，它不产生任何可视效果，
+   * 位置与并排时期**完全一致** —— 这一层刻意不动，删掉左边那颗时不去顺带挪动右边这颗。
+   */
+  return (
+    <XStack alignItems="flex-end" gap={6} flexShrink={0}>
+      <SvipChip />
     </XStack>
   );
 }
@@ -258,6 +415,18 @@ export default function MeScreen() {
       // 记下最后一次成功的资料，供离线时展示
       void writeCache(PROFILE_CACHE_KEY, profileResult.value);
 
+      // 先把持久化标记读回共享状态，再登记概念版状态：
+      // syncFromStorage 在「作用域变了」时会清空内存状态（冷启动时账号刚从 guest 变成真实账号），
+      // 顺序反了会把刚登记的概念版状态一起清掉。
+      // 放在这里而不是只靠按钮挂载时那次读取，是为了让按钮**首帧**就是「已领取」，
+      // 而不是先闪一下「还没领」再跳过去。
+      await syncFromStorage();
+      if (requestId !== requestIdRef.current) return;
+
+      // 概念版状态直接用刚拿到的资料登记（fetchUserProfile 内部打的就是 /user/vip/detail），
+      // 这样按钮不必为同一个布尔再查一次接口。
+      markConceptStatus(profileResult.value.conceptValid);
+
       startTransition(() => {
         setState({
           checking: false,
@@ -268,9 +437,9 @@ export default function MeScreen() {
         });
       });
 
-      // 已登录且拿到了资料：这是天然能观察到 VIP 是否过期的时机。
-      // 过期则延时静默补领（内部有去重，重复调用无副作用）。
-      scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
+      // 这里刻意**不再**排 VIP 静默领取：自动补领已经改成「开始播放歌曲时」触发
+      // （见 vip-play-claim）。留在页面加载里会让它先吃掉 vip-silent-claim 的会话级标记，
+      // 用户真正开播时反而不领了。
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
 
@@ -278,6 +447,16 @@ export default function MeScreen() {
       // 不该因为拉不到昵称头像就整页变成错误态。
       const cached = state.profile ? null : await readCache<UserProfile>(PROFILE_CACHE_KEY);
       if (requestId !== requestIdRef.current) return;
+
+      // 同成功路径：先把持久化标记读回来，别让胶囊先闪一下可点态
+      await syncFromStorage();
+      if (requestId !== requestIdRef.current) return;
+
+      // 缓存可能是旧版本写的（那时还没有 conceptValid 字段），退回用 vipLabel 判断：
+      // 这里不追求绝对准确，只是别让按钮在离线时卡在「查询中」。
+      if (cached) {
+        markConceptStatus(cached.conceptValid ?? cached.vipLabel === 'SVIP');
+      }
 
       startTransition(() => {
         setState((current) => {
@@ -389,7 +568,11 @@ export default function MeScreen() {
                       <Artwork uri={null} size={68} circle />
                     )}
                   </View>
-                  <XStack flex={1} alignItems="center" gap={8} paddingBottom={8}>
+                  <XStack
+                    flex={1}
+                    alignItems="center"
+                    gap={8}
+                    paddingBottom={NICKNAME_ROW_PADDING_BOTTOM}>
                     <Text
                       flexShrink={1}
                       color={palette.text}
@@ -412,6 +595,9 @@ export default function MeScreen() {
                       </Text>
                     ) : null}
                   </XStack>
+                  {/* 昵称行右侧：SVIP 胶囊。
+                      外层 alignItems="flex-end"，胶囊靠自身的 marginBottom 与昵称对齐 */}
+                  <VipChipRow />
                 </XStack>
 
                 <YStack marginTop={8} gap={4}>

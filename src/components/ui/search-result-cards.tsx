@@ -6,7 +6,6 @@ import { Text, XStack, YStack } from 'tamagui';
 import { Artwork } from '@/components/ui/artwork';
 import type {
   SearchAlbum,
-  SearchArtist,
   SearchMv,
   SearchPlaylist,
 } from '@/features/search/search-api';
@@ -15,58 +14,12 @@ import { formatClock } from '@/lib/format';
 
 type CardProps<T> = {
   item: T;
-  /** 固定宽度（横向滚动时传入）；网格里不传则 flex 撑满格子。 */
-  width?: number;
   onPress: () => void;
 };
-
-function cardFrame(width?: number) {
-  return width ? { width } : { flex: 1 };
-}
-
-/** 歌手卡片：参考桌面端 ArtistGrid —— 头像 + 名字 + 专辑/单曲数。 */
-export const ArtistCard = memo(function ArtistCard({
-  item,
-  width,
-  onPress,
-}: CardProps<SearchArtist>) {
-  const palette = usePalette();
-  const counts = [
-    item.albumCount ? `专辑 ${item.albumCount}` : '',
-    item.songCount ? `单曲 ${item.songCount}` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  return (
-    <YStack
-      {...cardFrame(width)}
-      alignItems="center"
-      gap={8}
-      paddingVertical={10}
-      borderRadius={16}
-      transition="quickest"
-      pressStyle={{ opacity: 0.75, scale: 0.97 }}
-      onPress={onPress}>
-      <Artwork uri={item.avatarUrl} size={width ? width - 20 : 84} circle />
-      <YStack alignItems="center" gap={2} paddingHorizontal={4}>
-        <Text color={palette.text} fontSize={13.5} fontWeight="600" numberOfLines={1}>
-          {item.name}
-        </Text>
-        {counts ? (
-          <Text color={palette.textTertiary} fontSize={11} numberOfLines={1}>
-            {counts}
-          </Text>
-        ) : null}
-      </YStack>
-    </YStack>
-  );
-});
 
 /** 专辑卡片：参考桌面端 AlbumGrid —— 方形封面 + 专辑名 + 歌手/年份。 */
 export const AlbumCard = memo(function AlbumCard({
   item,
-  width,
   onPress,
 }: CardProps<SearchAlbum>) {
   const palette = usePalette();
@@ -74,7 +27,7 @@ export const AlbumCard = memo(function AlbumCard({
 
   return (
     <YStack
-      {...cardFrame(width)}
+      flex={1}
       gap={7}
       transition="quickest"
       pressStyle={{ opacity: 0.75, scale: 0.98 }}
@@ -95,14 +48,13 @@ export const AlbumCard = memo(function AlbumCard({
 /** 歌单卡片：参考桌面端 PlaylistGrid —— 封面（播放量角标）+ 歌单名 + 创建者。 */
 export const PlaylistCard = memo(function PlaylistCard({
   item,
-  width,
   onPress,
 }: CardProps<SearchPlaylist>) {
   const palette = usePalette();
 
   return (
     <YStack
-      {...cardFrame(width)}
+      flex={1}
       gap={7}
       transition="quickest"
       pressStyle={{ opacity: 0.75, scale: 0.98 }}
@@ -140,12 +92,12 @@ export const PlaylistCard = memo(function PlaylistCard({
 });
 
 /** MV 卡片：参考桌面端 MvGrid —— 16:9 封面 + 时长角标 + 标题 + 歌手。 */
-export const MvCard = memo(function MvCard({ item, width, onPress }: CardProps<SearchMv>) {
+export const MvCard = memo(function MvCard({ item, onPress }: CardProps<SearchMv>) {
   const palette = usePalette();
 
   return (
     <YStack
-      {...cardFrame(width)}
+      flex={1}
       gap={7}
       transition="quickest"
       pressStyle={{ opacity: 0.75, scale: 0.98 }}

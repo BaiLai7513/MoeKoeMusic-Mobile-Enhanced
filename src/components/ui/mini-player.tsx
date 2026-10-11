@@ -54,8 +54,19 @@ export function MiniPlayer() {
   const { track, playing, loading, buffering } = usePlayer();
   const rotation = useSharedValue(0);
 
+  /*
+   * 依赖里**故意没有 track / coverUrl**：切歌只换封面图，转盘继续转。
+   * 如果把曲目塞进依赖，每次切歌都会重建动画，角度从头再来一遍（视觉上是"抽一下"）。
+   */
   useEffect(() => {
     if (playing) {
+      /*
+       * 终点取「当前角度 + 360」而不是写死 360：
+       * withRepeat 每一轮都是从**创建这次动画时的起点**重来的，而真正的起点是动画
+       * 开始在 UI 线程上读到的当前值。暂停后恢复时如果写死 360，就会从当前角度转到
+       * 360° 再跳回起点，肉眼就是"倒转一下"。+360 保证起点→终点正好一整圈，
+       * 而 360° 与 0° 同余（下面再 % 360），所以循环回绕那一瞬间看不出跳变。
+       */
       rotation.value = withRepeat(
         withTiming(rotation.value + 360, { duration: 16000, easing: Easing.linear }),
         -1,
@@ -64,6 +75,15 @@ export function MiniPlayer() {
     } else {
       cancelAnimation(rotation);
     }
+
+    /*
+     * 卸载时必须停：withRepeat 是无限循环，没人取消就一直占着 UI 线程推帧。
+     * 而 MiniPlayer 是会被摘掉的（Tab 页键盘弹出时 dock 整个消失、搜索/歌单进入多选、
+     * 切页时各自页面持有的实例卸载），不清理就是实打实的动画泄漏。
+     */
+    return () => {
+      cancelAnimation(rotation);
+    };
   }, [playing, rotation]);
 
   const spinStyle = useAnimatedStyle(() => ({

@@ -11,7 +11,7 @@ import {
   type NativeQueueItem,
 } from './PlayerManager';
 import { loadLyricLines } from './lyrics';
-import { resolveSongSource } from './song-url';
+import { PlaybackUnavailableError, resolveSongSource } from './song-url';
 import type { LyricLine, LyricsStatus, PlayMode, PlayerTrack } from './types';
 
 export type PlayerState = {
@@ -87,11 +87,102 @@ function createStore<T extends object>(initial: T) {
 const playerStore = createStore(INITIAL_PLAYER_STATE);
 const progressStore = createStore(INITIAL_PROGRESS_STATE);
 
+// ---------------- 「开始播放歌曲」通知 ----------------
+//
+// 给「开播后要做一次」的副作用（目前是 VIP 自动补领）一个统一入口。
+//
+// 为什么用订阅而不是在 loadTrackAt 之类的 action 里塞回调：`playing` 变 true 有两条
+// 互不相干的路径 —— `loadTrackAt`（点歌/切歌，JS 主动）和 `applyNativeState`
+// （锁屏、耳机、通知栏、暂停后恢复，原生主动）。回调散在 action 里就必须每处都记得写，
+// 漏一处就会出现「用系统按钮播放时永远不触发」这种只在特定操作下才复现的差异。
+// 挂在 store 上，任何把 playing/曲目写成「正在播这首」的代码路径都自动覆盖。
+//
+// 去重键用「曲目 hash + 是否在播」：缓冲、歌词、进度这类同曲状态变化不重复通知，
+// 而切歌（hash 变）与暂停后恢复（先清空键）都算一次新的开始播放。
+
+const playbackStartListeners = new Set<() => void>();
+let lastStartedHash = '';
+
+playerStore.subscribe(() => {
+  const { playing, track } = playerStore.getState();
+
+  if (!playing || !track) {
+    // 播完/暂停后清掉键，这样「暂停再播同一首」也算一次新的开始播放
+    lastStartedHash = '';
+    return;
+  }
+
+  if (track.hash === lastStartedHash) {
+    return;
+  }
+  lastStartedHash = track.hash;
+
+  for (const listener of playbackStartListeners) {
+    try {
+      listener();
+    } catch (error) {
+      // 订阅者（VIP 补领）属于锦上添花，异常绝不能冒泡回播放链路
+      console.warn('[player] 开始播放回调异常:', error);
+    }
+  }
+});
+
+/**
+ * 订阅「开始播放歌曲」。回调会在开播与切歌时触发，**频率由调用方自己去重** ——
+ * 这里刻意不做节流，因为「多频繁算合理」是业务的事（见 vip-silent-claim 的三层节流）。
+ *
+ * 返回取消订阅函数。
+ */
+export function onPlaybackStart(listener: () => void): () => void {
+  playbackStartListeners.add(listener);
+  return () => {
+    playbackStartListeners.delete(listener);
+  };
+}
+
 let loadSequence = 0;
 let failStreak = 0;
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 // 每次“建立新队列”都会自增；后台补齐歌单剩余曲目时靠它判断队列是否已被替换。
 let queueGeneration = 0;
+
+// ---------------- 「因缺少 VIP 而播不了」通知 ----------------
+//
+// 与上面的 onPlaybackStart 同一个思路：播放链路不该知道 VIP 领取的存在，只负责把
+// 「用户点到的这首歌被 VIP 挡住了」这个事实广播出去，由 account 侧决定要不要立刻补领。
+//
+// 为什么**只有** loadTrackAt（用户真正点到的当前曲目）广播，而不包括预解析失败：
+// 每次开播后的 prefetchAround 都会把后面 8 首一次性铺开，队列里必然夹着 VIP 歌，
+// 它们失败是常态。若那也算「用户被挡住」，随机延时就会在每次开播的瞬间被立刻收掉，
+// 防风控的节奏设计等于白写 —— 通知的语义必须是「用户此刻听不了这首歌」，而不是
+// 「我们刚刚探测到一首以后可能播不了的歌」。
+
+/**
+ * 最近一次「因缺少 VIP 而解析失败」的曲目 hash。**只在它仍是当前曲目时**用于
+ * VIP 到手后的原地自愈（见 retryVipBlockedTrack），所以用户一换歌它就自然失效。
+ */
+let vipBlockedHash: string | null = null;
+
+const vipBlockedListeners = new Set<() => void>();
+
+/** 订阅「当前曲目因缺少 VIP 而无法播放」。返回取消订阅函数。 */
+export function onVipBlockedPlayback(listener: () => void): () => void {
+  vipBlockedListeners.add(listener);
+  return () => {
+    vipBlockedListeners.delete(listener);
+  };
+}
+
+function notifyVipBlocked() {
+  for (const listener of vipBlockedListeners) {
+    try {
+      listener();
+    } catch (error) {
+      // 同 onPlaybackStart：订阅者（VIP 补领）异常绝不能冒泡回播放链路
+      console.warn('[player] VIP 受限回调异常:', error);
+    }
+  }
+}
 
 // ---------------- 原生播放器接线 ----------------
 //
@@ -346,6 +437,37 @@ function recoverFromPlaybackError() {
   }, 1200);
 }
 
+/**
+ * VIP 到手后的自愈：如果**当前曲目**还停在「因缺少 VIP 而失败」上，就重新解析它并播放。
+ *
+ * 为什么必须限定「当前曲目 = 那条失败记录」：从失败到 VIP 到手中间隔着一次查状态 + 一次
+ * 领取请求（几百毫秒到几秒），而且失败后播放器还会自动跳歌。这段里用户完全可能已经在听
+ * 别的歌了，那时把他切回去，是最招人烦的一种「贴心」。用户一换歌，`vipBlockedHash`
+ * 就对不上当前曲目，这里自然什么都不做。
+ *
+ * 为什么不直接调 loadTrackAt：自愈策略（丢掉直链 → 原地重新解析 → 再失败才跳歌）
+ * 项目里只有 recoverFromPlaybackError 一份实现，复用它可以白拿「同一首二次失败才跳歌」
+ * 的限流，不必再写一套跳歌逻辑。解析失败那次 playlistHashes 已被清空，所以它会走
+ * `loadTrackAt` 那条路 —— 正是我们要的「拿新身份（已领到 VIP）重新解析整首」。
+ *
+ * 返回是否真的发起了重试（供日志/测试判断，正常路径不需要看）。
+ */
+export function retryVipBlockedTrack(): boolean {
+  const { track, error } = playerStore.getState();
+  // 没有错误态说明当前曲目并不处于「播不了」的状态：可能已经在放了，
+  // 此时再重试等于把歌从头开始，纯属倒退
+  if (!track || !error || track.hash !== vipBlockedHash) {
+    return false;
+  }
+
+  // 必须清掉自愈标记：否则会命中上面「同一首二次失败」那条分支，
+  // 用户刚领到 VIP，等来的却是自己的歌被跳过
+  recoveryTrackHash = null;
+  console.log(`[player] VIP 已到账，重新解析当前曲目: ${track.title}`);
+  recoverFromPlaybackError();
+  return true;
+}
+
 /** 通知栏/锁屏/耳机的切歌命令：JS 解析地址后再下发播放。 */
 function handleNativeCommand(command: 'next' | 'previous') {
   void skip(command === 'next' ? 1 : -1);
@@ -476,6 +598,8 @@ async function loadTrackAt(index: number) {
     await PlayerManager.setPlaybackMode(playerStore.getState().mode);
 
     failStreak = 0;
+    // 当前曲目真的播出来了 → 之前那条「缺 VIP」的记录已经过期作废
+    vipBlockedHash = null;
     playerStore.setState({ loading: false, playing: true, buffering: false });
     if (source.durationMs > 0) {
       progressStore.setState({ durationMs: source.durationMs });
@@ -490,6 +614,11 @@ async function loadTrackAt(index: number) {
     }
 
     failStreak += 1;
+    // 只有「缺 VIP」这一类值得记下来：领到 VIP 后重新解析它就可能成功。
+    // 无版权/本地文件缺失就算领了 VIP 也一样放不了，记下来只会换来一次无意义的请求。
+    const blockedByVip = error instanceof PlaybackUnavailableError && error.reason === 'vip';
+    vipBlockedHash = blockedByVip ? track.hash : null;
+
     playerStore.setState({
       loading: false,
       playing: false,
@@ -497,6 +626,11 @@ async function loadTrackAt(index: number) {
       lyricsStatus: 'empty',
       error: error instanceof Error ? error.message : '播放失败，请稍后重试',
     });
+
+    if (blockedByVip) {
+      // 放在 setState 之后：订阅方（VIP 补领）此刻读到的错误状态与 UI 一致
+      notifyVipBlocked();
+    }
 
     const { queue: currentQueue } = playerStore.getState();
     const maxStreak = Math.min(currentQueue.length, 6);

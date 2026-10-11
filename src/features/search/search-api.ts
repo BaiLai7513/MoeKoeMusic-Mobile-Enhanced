@@ -8,10 +8,10 @@ export type SearchKeyword = {
   reason: string;
 };
 
-/** 搜索标签，与桌面端搜索页保持一致：综合/单曲/歌单/专辑/MV/歌手。 */
-export type SearchTab = 'complex' | 'song' | 'special' | 'album' | 'mv' | 'author';
+/** 搜索标签：单曲/歌单/专辑/MV（「综合」与「歌手」分类在移动端都没有 tab 入口，类型里也不再保留）。 */
+export type SearchTab = 'song' | 'special' | 'album' | 'mv';
 
-export type SearchSongsPage = {
+type SearchSongsPage = {
   tracks: PlayerTrack[];
   total: number;
   hasMore: boolean;
@@ -35,14 +35,6 @@ export type SearchAlbum = {
   publishDate: string;
 };
 
-export type SearchArtist = {
-  id: string;
-  name: string;
-  avatarUrl: string | null;
-  albumCount: number;
-  songCount: number;
-};
-
 export type SearchMv = {
   hash: string;
   name: string;
@@ -51,23 +43,10 @@ export type SearchMv = {
   durationMs: number;
 };
 
-export type SearchListPage<T> = {
+type SearchListPage<T> = {
   items: T[];
   total: number;
   hasMore: boolean;
-};
-
-/** 综合搜索结果：每个分区带条目和总数，供“查看更多”跳转对应标签。 */
-export type ComplexSearchResult = {
-  artists: SearchArtist[];
-  songs: PlayerTrack[];
-  songsTotal: number;
-  albums: SearchAlbum[];
-  albumsTotal: number;
-  playlists: SearchPlaylist[];
-  playlistsTotal: number;
-  mvs: SearchMv[];
-  mvsTotal: number;
 };
 
 const SEARCH_PAGE_SIZE = 30;
@@ -76,7 +55,7 @@ function computeHasMore(total: number, page: number, received: number): boolean 
   return total > 0 ? page * SEARCH_PAGE_SIZE < total : received === SEARCH_PAGE_SIZE;
 }
 
-/* ---------- 各类型的字段映射，分类型搜索与综合搜索共用 ---------- */
+/* ---------- 各类型的字段映射：把酷狗返回的原始记录转成搜索页直接可用的模型 ---------- */
 
 function mapSongRecord(item: Record<string, unknown>): PlayerTrack | null {
   const hash = pickText(item.FileHash);
@@ -138,22 +117,6 @@ function mapAlbumRecord(item: Record<string, unknown>): SearchAlbum | null {
   };
 }
 
-function mapArtistRecord(item: Record<string, unknown>): SearchArtist | null {
-  const id = pickStringLike(item.AuthorId, item.SingerId);
-  const name = stripEmTags(pickText(item.AuthorName, item.SingerName));
-  if (!id || !name) {
-    return null;
-  }
-
-  return {
-    id,
-    name,
-    avatarUrl: sizedImage(pickText(item.Avatar, item.Image), 480),
-    albumCount: pickNumber(item.AlbumCount),
-    songCount: pickNumber(item.AudioCount),
-  };
-}
-
 /** 酷狗 MV 封面既有完整 URL，也有形如“20240101xxx.jpg”的裸文件名，需要拼接 CDN。 */
 function resolveMvCover(url: string, size: number): string | null {
   if (!url) {
@@ -194,7 +157,7 @@ function mapAll<T>(records: Record<string, unknown>[], mapper: (item: Record<str
 
 /* ---------- 分类型搜索 ---------- */
 
-async function searchLists(keywords: string, page: number, type: Exclude<SearchTab, 'complex'>) {
+async function searchLists(keywords: string, page: number, type: SearchTab) {
   await bootstrapMobileApi();
   const response = await mobileApi.search({
     keywords,
@@ -229,67 +192,12 @@ export async function searchAlbums(
   return { items: mapAll(records, mapAlbumRecord), total, hasMore: computeHasMore(total, page, records.length) };
 }
 
-export async function searchArtists(
-  keywords: string,
-  page: number
-): Promise<SearchListPage<SearchArtist>> {
-  const { records, total } = await searchLists(keywords, page, 'author');
-  return { items: mapAll(records, mapArtistRecord), total, hasMore: computeHasMore(total, page, records.length) };
-}
-
 export async function searchMvs(
   keywords: string,
   page: number
 ): Promise<SearchListPage<SearchMv>> {
   const { records, total } = await searchLists(keywords, page, 'mv');
   return { items: mapAll(records, mapMvRecord), total, hasMore: computeHasMore(total, page, records.length) };
-}
-
-/* ---------- 综合搜索 ---------- */
-
-export async function searchComplex(keywords: string): Promise<ComplexSearchResult> {
-  await bootstrapMobileApi();
-  const response = await mobileApi.search_complex({ keywords });
-  const sections = toRecords(toRecord(toRecord(response.body).data).lists);
-
-  const result: ComplexSearchResult = {
-    artists: [],
-    songs: [],
-    songsTotal: 0,
-    albums: [],
-    albumsTotal: 0,
-    playlists: [],
-    playlistsTotal: 0,
-    mvs: [],
-    mvsTotal: 0,
-  };
-
-  for (const section of sections) {
-    const type = pickText(section.type);
-    const lists = toRecords(section.lists);
-    const total = pickNumber(section.total);
-    if (!lists.length) {
-      continue;
-    }
-
-    if (type === 'author') {
-      result.artists = mapAll(lists, mapArtistRecord);
-    } else if (type === 'song') {
-      result.songs = mapAll(lists, mapSongRecord);
-      result.songsTotal = total || result.songs.length;
-    } else if (type === 'album') {
-      result.albums = mapAll(lists, mapAlbumRecord);
-      result.albumsTotal = total || result.albums.length;
-    } else if (type === 'collect') {
-      result.playlists = mapAll(lists, mapPlaylistRecord);
-      result.playlistsTotal = total || result.playlists.length;
-    } else if (type === 'mv') {
-      result.mvs = mapAll(lists, mapMvRecord);
-      result.mvsTotal = total || result.mvs.length;
-    }
-  }
-
-  return result;
 }
 
 /* ---------- 热搜 / 搜索建议 ---------- */

@@ -26,17 +26,15 @@ import { isLoggedIn } from '@/features/account/user-api';
 import { isDownloadSupported } from '@/features/download/downloader';
 import { useBatchSelect } from '@/features/download/use-batch-select';
 import { playCollection } from '@/features/player/play-collection';
-import { playerActions, useHasTrack, usePlayer } from '@/features/player/store';
+import { useHasTrack, usePlayer } from '@/features/player/store';
 import type { PlayerTrack } from '@/features/player/types';
 import {
   fetchHotKeywords,
   fetchSuggestions,
   searchAlbums,
-  searchComplex,
   searchMvs,
   searchPlaylists,
   searchSongs,
-  type ComplexSearchResult,
   type SearchAlbum,
   type SearchKeyword,
   type SearchMv,
@@ -46,7 +44,6 @@ import {
 import { usePalette } from '@/hooks/use-palette';
 
 const SEARCH_TABS: { value: SearchTab; label: string }[] = [
-  { value: 'complex', label: '综合' },
   { value: 'song', label: '单曲' },
   { value: 'special', label: '歌单' },
   { value: 'album', label: '专辑' },
@@ -55,12 +52,10 @@ const SEARCH_TABS: { value: SearchTab; label: string }[] = [
 
 /** 各标签的网格列数，与桌面端的网格布局对应（移动端窄屏收窄）。 */
 const TAB_COLUMNS: Record<SearchTab, number> = {
-  complex: 1,
   song: 1,
   special: 2,
   album: 2,
   mv: 2,
-  author: 3,
 };
 
 type ListItem = PlayerTrack | SearchPlaylist | SearchAlbum | SearchMv;
@@ -78,7 +73,6 @@ type ResultsState = {
   keyword: string;
   tab: SearchTab;
   items: ListItem[];
-  complex: ComplexSearchResult | null;
   page: number;
   total: number;
   hasMore: boolean;
@@ -89,9 +83,8 @@ type ResultsState = {
 
 const EMPTY_RESULTS: ResultsState = {
   keyword: '',
-  tab: 'complex',
+  tab: 'song',
   items: [],
-  complex: null,
   page: 0,
   total: 0,
   hasMore: false,
@@ -108,10 +101,11 @@ type FetchPage = {
 
 /**
  * 拉取某个分类的一页结果。
- * 保留「单曲 / 歌单 / 专辑 / MV」四类（歌手分类已移除）。
+ * SearchTab 现在就是这四类、与接口的 type 一一对应，因此直接透传，
+ * 不再需要把「综合」之类收敛成某一类的中间函数。
  */
 async function fetchTabPage(
-  tab: 'song' | 'special' | 'album' | 'mv',
+  tab: SearchTab,
   keyword: string,
   page: number
 ): Promise<FetchPage> {
@@ -126,14 +120,6 @@ async function fetchTabPage(
     return searchMvs(keyword, page);
   }
   return searchAlbums(keyword, page);
-}
-
-/** 把任意 tab 收敛到 [fetchTabPage] 支持的四类之一。 */
-function toFetchableTab(tab: SearchTab): 'song' | 'special' | 'album' | 'mv' {
-  if (tab === 'special' || tab === 'album' || tab === 'mv') {
-    return tab;
-  }
-  return 'song';
 }
 
 function itemKey(item: ListItem): string {
@@ -155,7 +141,17 @@ export default function SearchScreen() {
   const initialQuery = typeof params.q === 'string' ? params.q.trim() : '';
 
   const [query, setQuery] = useState(initialQuery);
-  const [activeTab, setActiveTab] = useState<SearchTab>('complex');
+  const [activeTab, setActiveTab] = useState<SearchTab>('song');
+  /*
+   * 当前被按住的分类 chip（null = 都没按）。
+   *
+   * 按压反馈刻意用 React 状态而不是 pressStyle 表达：Tamagui 的 pressStyle 伪类由
+   * emitter 在 render 之外补发状态，多指同时按（多点触控）时每个 chip 各留一份自己的
+   * press 态，松手事件对不齐就清不干净 —— 表现为「两三个 chip 同时变暗、白字发灰」，
+   * 再点一次才恢复。这里只存**一个**值，后按下的覆盖前一个，
+   * 所以物理上不可能同时有两个 chip 处于按压态。
+   */
+  const [pressedTab, setPressedTab] = useState<SearchTab | null>(null);
   const [hotKeywords, setHotKeywords] = useState<SearchKeyword[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [results, setResults] = useState<ResultsState>(EMPTY_RESULTS);
@@ -218,24 +214,7 @@ export default function SearchScreen() {
     setResults({ ...EMPTY_RESULTS, keyword: trimmed, tab, searching: true });
 
     try {
-      if (tab === 'complex') {
-        const complex = await searchComplex(trimmed);
-        if (searchId !== searchIdRef.current) {
-          return;
-        }
-        startTransition(() => {
-          setResults({
-            ...EMPTY_RESULTS,
-            keyword: trimmed,
-            tab,
-            complex,
-            searching: false,
-          });
-        });
-        return;
-      }
-
-      const page = await fetchTabPage(toFetchableTab(tab), trimmed, 1);
+      const page = await fetchTabPage(tab, trimmed, 1);
       if (searchId !== searchIdRef.current) {
         return;
       }
@@ -291,12 +270,7 @@ export default function SearchScreen() {
   }
 
   async function loadMore() {
-    if (
-      results.tab === 'complex' ||
-      !results.hasMore ||
-      results.loadingMore ||
-      results.searching
-    ) {
+    if (!results.hasMore || results.loadingMore || results.searching) {
       return;
     }
 
@@ -306,7 +280,7 @@ export default function SearchScreen() {
 
     try {
       const nextPage = results.page + 1;
-      const page = await fetchTabPage(toFetchableTab(tab), keyword, nextPage);
+      const page = await fetchTabPage(tab, keyword, nextPage);
       if (searchId !== searchIdRef.current) {
         return;
       }
@@ -374,15 +348,7 @@ export default function SearchScreen() {
   const listBottomInset = insets.bottom + (hasTrack ? MINI_PLAYER_HEIGHT + 26 : 16) + 16;
   const columns = TAB_COLUMNS[results.tab];
 
-  const hasComplexContent = Boolean(
-    results.complex &&
-      (results.complex.artists.length ||
-        results.complex.songs.length ||
-        results.complex.albums.length ||
-        results.complex.playlists.length ||
-        results.complex.mvs.length)
-  );
-  const hasContent = results.tab === 'complex' ? hasComplexContent : results.items.length > 0;
+  const hasContent = results.items.length > 0;
 
   // 多选只对「单曲」结果开放：歌单/专辑/MV 是卡片，不适用批量下载
   const batch = useBatchSelect();
@@ -403,113 +369,6 @@ export default function SearchScreen() {
         return { tracks: result.tracks, hasMore: result.hasMore };
       },
     });
-  }
-
-  /* ---------- 综合页的分区标题 ---------- */
-
-  function SectionHeader({
-    title,
-    total,
-    moreTab,
-  }: {
-    title: string;
-    total?: number;
-    moreTab?: SearchTab;
-  }) {
-    return (
-      <XStack alignItems="center" justifyContent="space-between" paddingHorizontal={16}>
-        <Text color={palette.text} fontSize={17} fontWeight="700">
-          {title}
-        </Text>
-        {moreTab ? (
-          <XStack
-            alignItems="center"
-            gap={2}
-            pressStyle={{ opacity: 0.6 }}
-            onPress={() => changeTab(moreTab)}>
-            <Text color={palette.textTertiary} fontSize={12.5}>
-              查看更多{total ? `(${total})` : ''}
-            </Text>
-            <Ionicons name="chevron-forward" size={13} color={palette.textTertiary} />
-          </XStack>
-        ) : null}
-      </XStack>
-    );
-  }
-
-  function renderComplex(complex: ComplexSearchResult) {
-    const songs = complex.songs.slice(0, 5);
-    return (
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={Keyboard.dismiss}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: listBottomInset, gap: 22 }}>
-        {songs.length ? (
-          <YStack gap={6}>
-            <SectionHeader title="单曲" total={complex.songsTotal} moreTab="song" />
-            <YStack paddingHorizontal={12}>
-              {songs.map((song, index) => (
-                <SongListItem
-                  key={`${song.hash}-${index}`}
-                  track={song}
-                  active={song.hash === activeHash}
-                  onPress={() => void playerActions.playTracks(songs, index)}
-                  onMore={() => setActionTrack(song)}
-                />
-              ))}
-            </YStack>
-          </YStack>
-        ) : null}
-
-        {complex.playlists.length ? (
-          <YStack gap={10}>
-            <SectionHeader title="歌单" total={complex.playlistsTotal} moreTab="special" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {complex.playlists.map((playlist) => (
-                <PlaylistCard
-                  key={playlist.id}
-                  item={playlist}
-                  width={136}
-                  onPress={() => openPlaylist(playlist)}
-                />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
-
-        {complex.albums.length ? (
-          <YStack gap={10}>
-            <SectionHeader title="专辑" total={complex.albumsTotal} moreTab="album" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {complex.albums.map((album) => (
-                <AlbumCard key={album.id} item={album} width={136} onPress={() => openAlbum(album)} />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
-
-        {complex.mvs.length ? (
-          <YStack gap={10}>
-            <SectionHeader title="MV" total={complex.mvsTotal} moreTab="mv" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {complex.mvs.map((mv) => (
-                <MvCard key={mv.hash} item={mv} width={210} onPress={() => openMv(mv)} />
-              ))}
-            </ScrollView>
-          </YStack>
-        ) : null}
-      </ScrollView>
-    );
   }
 
   function renderGridItem(item: ListItem, index: number) {
@@ -636,22 +495,68 @@ export default function SearchScreen() {
                 <XStack
                   key={tab.value}
                   height={TAB_CHIP_HEIGHT}
-                  paddingHorizontal={15}
                   alignItems="center"
                   justifyContent="center"
                   borderRadius={999}
+                  overflow="hidden"
+                  /*
+                   * 选中态刻意不用「会动的 backgroundColor」来表达。
+                   *
+                   * 原因：@tamagui/animations-react-native 的颜色动画用一个 0/1 的
+                   * Animated.Value 加 animateToValue 开关（见 createAnimations.tsx 的
+                   * getColorInterpolated）。而 render 路径与 avoidReRenders 的 emitter
+                   * 路径会在同一帧各 update 一次同一个 key，开关被取反两次，进行中的
+                   * 「accent → card」会被倒放回 accent —— 表现为「旧 tab 又亮一下」。
+                   * pressStyle 之类的伪类状态靠 emitter 补发，正是同帧第二次 update 的来源
+                   * （本 chip 的按压反馈现在已改为 pressedTab 状态驱动，见下方 props）。
+                   *
+                   * 改成「恒定 accent 色的填充层 + opacity 淡入淡出」后，填充色永远正确，
+                   * 重复驱动也不可能闪出错误的颜色。
+                   */
+                  animateOnly={['opacity', 'transform']}
                   backgroundColor={active ? palette.accent : palette.card}
                   borderWidth={StyleSheet.hairlineWidth}
                   borderColor={active ? palette.accent : palette.border}
                   transition="quickest"
-                  pressStyle={{ opacity: 0.7, scale: 0.97 }}
+                  /*
+                   * 按压态由 pressedTab 单一状态驱动（见其声明处的说明），不再用 pressStyle：
+                   * opacity/scale 走 props，仍然受上面的 transition + animateOnly 管辖，
+                   * 动画参数与选中态的填充淡入淡出保持一致。
+                   */
+                  opacity={pressedTab === tab.value ? 0.7 : 1}
+                  scale={pressedTab === tab.value ? 0.97 : 1}
+                  onPressIn={() => setPressedTab(tab.value)}
+                  /*
+                   * 松手要清；横向 ScrollView 抢走手势时 Tamagui 也会走 responder terminate
+                   * 并把 onPressOut 补发出来（mainThreadPressEvents 的 deactivate），
+                   * 所以「按下后滑动去滚动」同样会取消按压态，不会留下一个一直按着的 chip。
+                   *
+                   * 清除时先判断「现在按住的还是不是我」：多指同按时后按下的会顶掉前一个，
+                   * 如果这里无条件写 null，先抬起的那根手指会把**仍按着**的那个 chip 的
+                   * 高亮一起抹掉（高亮在手底下凭空消失）。带上判断后，
+                   * 高亮始终跟着最后按下的那根手指，且依然最多只有一个。
+                   */
+                  onPressOut={() =>
+                    setPressedTab((current) => (current === tab.value ? null : current))
+                  }
                   onPress={() => changeTab(tab.value)}>
-                  <Text
-                    color={active ? '#FFFFFF' : palette.textSecondary}
-                    fontSize={13}
-                    fontWeight={active ? '700' : '500'}>
-                    {tab.label}
-                  </Text>
+                  <XStack
+                    pointerEvents="none"
+                    opacity={active ? 1 : 0}
+                    transition="quickest"
+                    animateOnly={['opacity']}
+                    backgroundColor={palette.accent}
+                    borderRadius={999}
+                    style={styles.tabFill}
+                  />
+                  <XStack style={styles.tabContent}>
+                    <Text
+                      color={active ? '#FFFFFF' : palette.textSecondary}
+                      fontSize={13}
+                      fontWeight={active ? '700' : '500'}>
+                      {tab.label}
+                    </Text>
+                  </XStack>
                 </XStack>
               );
             })}
@@ -730,8 +635,6 @@ export default function SearchScreen() {
                 </XStack>
               </YStack>
             )
-          ) : results.tab === 'complex' && results.complex ? (
-            renderComplex(results.complex)
           ) : (
             <FlatList
               key={results.tab}
@@ -898,5 +801,21 @@ const styles = StyleSheet.create({
   miniDockInner: {
     width: '100%',
     maxWidth: 680,
+  },
+  /*
+   * 绝对定位的填充层按父级 padding box 拉伸、且**不补偿**父级 padding，
+   * 所以 paddingHorizontal 必须挪到内容层，否则填充层会比胶囊大一圈。
+   */
+  tabFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  tabContent: {
+    paddingHorizontal: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

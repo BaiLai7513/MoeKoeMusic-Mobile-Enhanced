@@ -236,7 +236,7 @@ export function CreatePlaylistSheet({
   );
 }
 
-export type TrackRemovalContext = {
+type TrackRemovalContext = {
   /** 所在歌单的 listid(写操作用)。 */
   listid: string;
   /** 移除成功后由页面同步本地列表。 */

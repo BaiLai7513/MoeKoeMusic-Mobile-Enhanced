@@ -2,14 +2,14 @@
   "expo": {
     "name": "MoeKoe",
     "slug": "moekoe",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moekoe",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.moekoe.music",
-      "versionCode": 10,
+      "versionCode": 11,
       "adaptiveIcon": {
         "backgroundColor": "#F6F9FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png"

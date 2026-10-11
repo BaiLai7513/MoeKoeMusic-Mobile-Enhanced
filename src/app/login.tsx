@@ -34,10 +34,6 @@ import {
   SMS_COOLDOWN_SECONDS,
   startSmsCooldown,
 } from '@/features/account/login-throttle';
-import {
-  scheduleSilentVipClaim,
-  VIP_CLAIMED_TOAST,
-} from '@/features/account/vip-silent-claim';
 import { usePalette } from '@/hooks/use-palette';
 import { pickNumber, pickText, toRecord } from '@/lib/api-parse';
 import { sizedImage } from '@/lib/format';
@@ -572,9 +568,10 @@ export default function LoginScreen() {
 
   function finishLogin() {
     showToast('登录成功');
-    // 刚拿到会话：立刻排一次 VIP 静默领取检查
-    // （启动时可能还没登录，那时不会消耗会话标记，所以这里能生效）
-    scheduleSilentVipClaim({ onClaimed: () => showToast(VIP_CLAIMED_TOAST) });
+    // 这里刻意不再排 VIP 领取：自动补领已经改成「开始播放歌曲时」触发
+    // （见 vip-play-claim）。留在登录成功这一刻排，等于把刚挪走的「非播放触发」
+    // 又加回来一条，而且它会先消耗掉 vip-silent-claim 的会话级标记，
+    // 导致用户真正开播时反而不领了。
     router.back();
   }
 

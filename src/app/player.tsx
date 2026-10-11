@@ -44,8 +44,19 @@ function SpinningDisc({ coverUrl, playing, size }: { coverUrl: string | null; pl
   const isDark = useIsDark();
   const rotation = useSharedValue(0);
 
+  /*
+   * 依赖里**故意没有 coverUrl / track**：切歌只换封面图，转盘继续转。
+   * 把曲目塞进依赖会让每次切歌都重建动画，角度从头再来一遍（视觉上是"抽一下"）。
+   */
   useEffect(() => {
     if (playing) {
+      /*
+       * 终点取「当前角度 + 360」而不是写死 360：withRepeat 每一轮都是从创建动画时的
+       * 起点重来的，而真正的起点是动画在 UI 线程上读到的当前值。写死 360 的话，
+       * 暂停后恢复会从当前角度转到 360° 再跳回起点，肉眼就是"倒转一下"。
+       * +360 保证起点→终点正好一整圈，而 360° 与 0° 同余（下面再 % 360），
+       * 所以循环回绕那一瞬间看不出跳变。
+       */
       rotation.value = withRepeat(
         withTiming(rotation.value + 360, { duration: 24000, easing: Easing.linear }),
         -1,
@@ -54,6 +65,15 @@ function SpinningDisc({ coverUrl, playing, size }: { coverUrl: string | null; pl
     } else {
       cancelAnimation(rotation);
     }
+
+    /*
+     * 卸载时必须停：withRepeat 是无限循环，没人取消就一直占着 UI 线程推帧。
+     * 播放页返回时整个页面会被销毁（封面就在 ScrollView 里），不清理就是实打实的
+     * 动画泄漏 —— 和 MiniPlayer 里那处是同一个问题。
+     */
+    return () => {
+      cancelAnimation(rotation);
+    };
   }, [playing, rotation]);
 
   const spinStyle = useAnimatedStyle(() => ({
