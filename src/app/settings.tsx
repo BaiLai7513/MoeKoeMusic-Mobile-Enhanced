@@ -13,6 +13,7 @@ import { MaxContentWidth, type SchemeName } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
 import { libraryActions } from '@/features/library/store';
 import { AUDIO_QUALITIES, AUDIO_QUALITY_LABELS } from '@/features/player/audio-quality';
+import { ListenSyncSettingSection } from '@/features/player/listen-sync-setting';
 import {
   settingsActions,
   useAudioQuality,
@@ -318,6 +319,9 @@ export default function SettingsScreen() {
               优先请求该音质；若账号无权限或该档位拿不到地址，会自动依次降级到可用音质。
             </Text>
           </YStack>
+
+          {/* 听歌时长同步（默认关闭）。接口未就绪时整块自行返回 null，不留空标题。 */}
+          <ListenSyncSettingSection />
 
           <YStack gap={10}>
             <SectionHeader title="通用" />

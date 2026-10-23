@@ -1,7 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { startTransition, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
@@ -42,7 +48,15 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const dockInset = useDockContentInset();
-  const { width } = useWindowDimensions();
+  /*
+   * 这两个值**只当兜底**：真机证据（一加 PKR110，横屏分屏/自由小窗）下
+   * useWindowDimensions() 报的是整块显示器的 794.29×361.14，而不是 App 真实的
+   * 361×522 窗口 —— manifest 的 configChanges 含 orientation|screenSize，
+   * Activity 不重建、Dimensions 不跟着更新，错值会一直留着。
+   * 所以下面的 contentWidth 优先用根容器 onLayout 的实测宽度（与 player.tsx 同一套修法）。
+   */
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [rootSize, setRootSize] = useState<{ width: number; height: number } | null>(null);
   const { track } = usePlayer();
   const requestIdRef = useRef(0);
   const [state, setState] = useState<ScreenState>({
@@ -53,6 +67,31 @@ export default function HomeScreen() {
   });
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
 
+  /*
+   * 根容器的实测尺寸：分屏/自由窗口下唯一可信的来源（onLayout 走 Yoga，不经过 Dimensions）。
+   * 宽高一起存 —— 分屏既能左右切也能上下切，两个方向都可能被系统报错。
+   */
+  const handleRootLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width: measuredWidth, height: measuredHeight } = event.nativeEvent.layout;
+    const nextWidth = Math.round(measuredWidth);
+    const nextHeight = Math.round(measuredHeight);
+    if (nextWidth <= 0 || nextHeight <= 0) {
+      return;
+    }
+    setRootSize((prev) =>
+      prev && prev.width === nextWidth && prev.height === nextHeight
+        ? prev
+        : { width: nextWidth, height: nextHeight }
+    );
+  }, []);
+
+  /*
+   * 尺寸唯一来源：实测优先，测到之前才退回 useWindowDimensions。
+   * 兜底取「窗口宽高里的小值」—— 偏小只是卡片窄一点（还能完整显示），
+   * 偏大就会横向溢出被裁（正是这次要修的 bug），所以宁可保守。
+   * 全屏竖屏下小值 361、实测 361、旧的 useWindowDimensions 值 361 三者相等，视觉不变。
+   */
+  const width = rootSize?.width ?? Math.min(windowWidth, windowHeight);
   const contentWidth = Math.min(width, MaxContentWidth) - 32;
 
   async function refreshHome(mode: 'initial' | 'refresh' = 'initial') {
@@ -165,7 +204,7 @@ export default function HomeScreen() {
   const dailyColumns = chunkSongs(homeData.dailySongs, DAILY_COLUMN_SIZE);
 
   return (
-    <View flex={1} backgroundColor={palette.background}>
+    <View flex={1} backgroundColor={palette.background} onLayout={handleRootLayout}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={

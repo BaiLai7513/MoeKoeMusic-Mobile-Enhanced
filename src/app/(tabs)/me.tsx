@@ -656,9 +656,12 @@ export default function MeScreen() {
                     }
                   }}
                 />
+                {/* 图标底色跟「我喜欢」一样取主题渐变：这里原来写死的是
+                    ['#5EA8FF', '#3E7BFA']（一块谁都改不动的天蓝），换主题色之后
+                    并排两张卡片一个跟着 accent 走、一个还是蓝的，看着就像没生效。 */}
                 <QuickEntryCard
                   icon="phone-portrait-outline"
-                  gradient={['#5EA8FF', '#3E7BFA']}
+                  gradient={[palette.gradientStart, palette.gradientEnd]}
                   title="本地音乐"
                   subtitle="手机里的歌曲"
                   onPress={() => router.push('/local')}

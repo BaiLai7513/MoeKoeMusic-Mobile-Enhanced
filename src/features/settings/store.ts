@@ -6,6 +6,11 @@ import {
   isAudioQuality,
   type AudioQuality,
 } from '@/features/player/audio-quality';
+import {
+  DEFAULT_PLAYBACK_RATE,
+  isPlaybackRate,
+  type PlaybackRate,
+} from '@/features/player/playback-rate';
 
 import { readStoredAppearance, writeStoredAppearance } from './storage';
 
@@ -17,6 +22,11 @@ export type SettingsState = {
   accentId: AccentPresetId;
   /** 默认播放音质；拿不到该档位时会自动依次降级。 */
   quality: AudioQuality;
+  /**
+   * 播放倍速。它不只是「下次开播用」——换歌后原生播放器的 speed 可能被重置，
+   * 所以播放链路每次开播都会读这份值重新贴一次（见 features/player/store.ts）。
+   */
+  rate: PlaybackRate;
 };
 
 const INITIAL_SETTINGS_STATE: SettingsState = {
@@ -24,6 +34,7 @@ const INITIAL_SETTINGS_STATE: SettingsState = {
   themeMode: 'system',
   accentId: DEFAULT_ACCENT_ID,
   quality: DEFAULT_AUDIO_QUALITY,
+  rate: DEFAULT_PLAYBACK_RATE,
 };
 
 function createStore<T extends object>(initial: T) {
@@ -78,6 +89,7 @@ export function hydrateSettings(): Promise<void> {
         accentId: stored && isAccentPresetId(stored.accentId) ? stored.accentId : DEFAULT_ACCENT_ID,
         quality:
           stored && isAudioQuality(stored.quality) ? stored.quality : DEFAULT_AUDIO_QUALITY,
+        rate: stored && isPlaybackRate(stored.rate) ? stored.rate : DEFAULT_PLAYBACK_RATE,
         hydrated: true,
       });
     })().catch(() => {
@@ -88,8 +100,8 @@ export function hydrateSettings(): Promise<void> {
 }
 
 function persist() {
-  const { themeMode, accentId, quality } = settingsStore.getState();
-  void writeStoredAppearance({ themeMode, accentId, quality });
+  const { themeMode, accentId, quality, rate } = settingsStore.getState();
+  void writeStoredAppearance({ themeMode, accentId, quality, rate });
 }
 
 export const settingsActions = {
@@ -105,6 +117,10 @@ export const settingsActions = {
     settingsStore.setState({ quality });
     persist();
   },
+  setPlaybackRate(rate: PlaybackRate) {
+    settingsStore.setState({ rate });
+    persist();
+  },
 };
 
 /**
@@ -113,6 +129,14 @@ export const settingsActions = {
  */
 export function getCurrentAudioQuality(): AudioQuality {
   return settingsStore.getState().quality;
+}
+
+/**
+ * 同步读取当前倍速（供播放链路在开播时重新贴到原生播放器，不走 React hook）。
+ * 理由同 [getCurrentAudioQuality]：开播是热路径，不能等一次状态订阅。
+ */
+export function getCurrentPlaybackRate(): PlaybackRate {
+  return settingsStore.getState().rate;
 }
 
 export function useSettings(): SettingsState {
@@ -152,5 +176,13 @@ export function useAudioQuality(): AudioQuality {
     settingsStore.subscribe,
     () => settingsStore.getState().quality,
     () => INITIAL_SETTINGS_STATE.quality
+  );
+}
+
+export function usePlaybackRate(): PlaybackRate {
+  return useSyncExternalStore(
+    settingsStore.subscribe,
+    () => settingsStore.getState().rate,
+    () => INITIAL_SETTINGS_STATE.rate
   );
 }

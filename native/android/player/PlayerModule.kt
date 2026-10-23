@@ -364,6 +364,56 @@ class PlayerModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * 倍速播放。
+     *
+     * 档位由 JS 侧定义（0.5×~2×，与桌面版一致），这里仍然再夹一次区间：
+     * 传进来的值是 Double（可能来自持久化、降级逻辑甚至 NaN），
+     * 而 0 会让音频变成静音、越界值会让 media3 直接抛 IllegalArgumentException。
+     * 入口夹紧比在 JS 侧到处防御更省事，也保证「不管传什么，播出来的速度都合理」。
+     */
+    @ReactMethod
+    fun setRate(rate: Double, promise: Promise) {
+        mainHandler.post {
+            withController(promise) { controller ->
+                try {
+                    val target =
+                        if (rate.isNaN()) 1.0f else rate.toFloat().coerceIn(MIN_RATE, MAX_RATE)
+                    controller.setPlaybackSpeed(target)
+                    Log.i(TAG, "setRate $target")
+                    promise.resolve(true)
+                } catch (error: Throwable) {
+                    Log.e(TAG, "setRate() 失败", error)
+                    promise.reject("E_SET_RATE_FAILED", error.message, error)
+                }
+            }
+        }
+    }
+
+    /**
+     * 设置音量（0f~1f）。
+     *
+     * 存在的唯一理由是**睡眠定时的淡出**：到点直接 pause 会「啪」一下截断声音，
+     * 先把音量分几步压到 0 再暂停听感自然得多。media3 的 volume 是瞬时值、没有渐变 API，
+     * 所以渐变只能由 JS 侧一步步下发（见 features/player/sleep-timer.ts）。
+     */
+    @ReactMethod
+    fun setVolume(volume: Double, promise: Promise) {
+        mainHandler.post {
+            withController(promise) { controller ->
+                try {
+                    val target =
+                        if (volume.isNaN()) 1.0f else volume.toFloat().coerceIn(0.0f, 1.0f)
+                    controller.setVolume(target)
+                    promise.resolve(true)
+                } catch (error: Throwable) {
+                    Log.e(TAG, "setVolume() 失败", error)
+                    promise.reject("E_SET_VOLUME_FAILED", error.message, error)
+                }
+            }
+        }
+    }
+
     /** 主动拉一次当前状态（JS 冷启对齐 / 进度轮询用）。 */
     @ReactMethod
     fun getState(promise: Promise) {
@@ -434,6 +484,13 @@ class PlayerModule(private val reactContext: ReactApplicationContext) :
 
         /** 等待 MediaController 连接的最长时间 = 该值 × 50ms（当前 5 秒）。 */
         private const val CONNECT_TIMEOUT_TICKS = 100
+
+        /**
+         * 允许的倍速区间。与 JS 侧档位（0.5×~2×）同源，放宽到这里只是为了
+         * 挡住 NaN/0 这类会让播放器失真或静音的非法值。
+         */
+        private const val MIN_RATE = 0.5f
+        private const val MAX_RATE = 2.0f
 
         private const val TAG = "MoeKoePlayer"
     }

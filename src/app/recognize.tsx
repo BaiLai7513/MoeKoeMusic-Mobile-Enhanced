@@ -7,7 +7,7 @@ import {
 } from 'expo-audio';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -15,6 +15,7 @@ import {
   StyleSheet,
   View as RNView,
   useWindowDimensions,
+  type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,7 +59,15 @@ export default function RecognizeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const hasTrack = useHasTrack();
-  const { width: windowWidth } = useWindowDimensions();
+  /*
+   * 这两个值**只当兜底**：真机证据（一加 PKR110，横屏分屏/自由小窗）下
+   * useWindowDimensions() 报的是整块显示器的 794.29×361.14，而不是 App 真实的
+   * 361×522 窗口 —— manifest 的 configChanges 含 orientation|screenSize，
+   * Activity 不重建、Dimensions 不跟着更新，错值会一直留着。
+   * 识曲卡片的宽度/居中就是拿它算的，所以这里改成「根容器实测优先」（同 player.tsx）。
+   */
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [rootSize, setRootSize] = useState<{ width: number; height: number } | null>(null);
 
   const [status, setStatus] = useState<Status>('idle');
   const [seconds, setSeconds] = useState(0);
@@ -295,9 +304,34 @@ export default function RecognizeScreen() {
           ? errorMsg || '未识别到歌曲'
           : '靠近音源，点击按钮开始识别';
 
-  const contentWidth = Math.min(windowWidth, MaxContentWidth);
+  /*
+   * 根容器的实测尺寸：分屏/自由窗口下唯一可信的来源（onLayout 走 Yoga，不经过 Dimensions）。
+   * 宽高一起存 —— 分屏既能左右切也能上下切，两个方向都可能被系统报错。
+   */
+  const handleRootLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width: measuredWidth, height: measuredHeight } = event.nativeEvent.layout;
+    const nextWidth = Math.round(measuredWidth);
+    const nextHeight = Math.round(measuredHeight);
+    if (nextWidth <= 0 || nextHeight <= 0) {
+      return;
+    }
+    setRootSize((prev) =>
+      prev && prev.width === nextWidth && prev.height === nextHeight
+        ? prev
+        : { width: nextWidth, height: nextHeight }
+    );
+  }, []);
+
+  /*
+   * 尺寸唯一来源：实测优先，测到之前才退回 useWindowDimensions。
+   * 兜底取「窗口宽高里的小值」—— 偏小只是卡片窄一点（还能完整显示），
+   * 偏大就会横向溢出被裁（正是这次要修的 bug），所以宁可保守。
+   * 全屏竖屏下小值 361、实测 361、旧的 useWindowDimensions 值 361 三者相等，视觉不变。
+   */
+  const width = rootSize?.width ?? Math.min(windowWidth, windowHeight);
+  const contentWidth = Math.min(width, MaxContentWidth);
   const cardWidth = Math.min(contentWidth - 104, 300);
-  const sidePadding = Math.max(0, (windowWidth - cardWidth) / 2);
+  const sidePadding = Math.max(0, (width - cardWidth) / 2);
 
   const rippleScale = ripple.interpolate({ inputRange: [0, 1], outputRange: [1, 1.85] });
   const rippleOpacity = ripple.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.35, 0] });
@@ -310,7 +344,7 @@ export default function RecognizeScreen() {
   }
 
   return (
-    <View flex={1} backgroundColor={palette.background}>
+    <View flex={1} backgroundColor={palette.background} onLayout={handleRootLayout}>
       <LinearGradient
         colors={[palette.accentSoft, 'transparent']}
         style={styles.headerGlow}

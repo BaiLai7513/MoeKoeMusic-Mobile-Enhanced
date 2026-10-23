@@ -15,8 +15,10 @@ import Animated, {
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { Artwork } from '@/components/ui/artwork';
+import { useSleepTimer } from '@/features/player/sleep-timer';
 import { playerActions, usePlayer, usePlayerProgress } from '@/features/player/store';
 import { useIsDark, usePalette } from '@/hooks/use-palette';
+import { formatLongClock } from '@/lib/format';
 
 export const MINI_PLAYER_HEIGHT = 58;
 
@@ -52,6 +54,7 @@ export function MiniPlayer() {
   const isDark = useIsDark();
   const router = useRouter();
   const { track, playing, loading, buffering } = usePlayer();
+  const sleepTimer = useSleepTimer();
   const rotation = useSharedValue(0);
 
   /*
@@ -136,6 +139,35 @@ export function MiniPlayer() {
             {track.artist || '未知歌手'}
           </Text>
         </YStack>
+
+        {/*
+          睡眠定时生效时把剩余时间摆在常驻的 MiniPlayer 上。
+          刻意**不做点击处理**：整条 MiniPlayer 本身就是「进播放页」的按钮，
+          这里点下去会冒泡上去，用户到播放页里才能取消 ——
+          省掉「在迷你条上误触一下就把定时取消了」这种最难解释的失败。
+        */}
+        {sleepTimer.kind ? (
+          <XStack
+            height={24}
+            paddingHorizontal={8}
+            gap={3}
+            alignItems="center"
+            justifyContent="center"
+            borderRadius={999}
+            backgroundColor={palette.accentSoft}>
+            <Ionicons name="moon" size={11} color={palette.accent} />
+            {/* 与播放页药丸同一个格式：自定义时长超过 1 小时也要显示成 `1:59:30`，
+                否则迷你条上的倒计时会跟播放页对不上（一个 119:30、一个 1:59:30） */}
+            <Text
+              numberOfLines={1}
+              color={palette.accent}
+              fontSize={11}
+              fontWeight="700"
+              fontVariant={['tabular-nums']}>
+              {sleepTimer.fading ? '淡出' : formatLongClock(sleepTimer.remainingMs)}
+            </Text>
+          </XStack>
+        ) : null}
 
         <XStack
           width={38}

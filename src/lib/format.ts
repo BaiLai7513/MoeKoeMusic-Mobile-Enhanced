@@ -24,6 +24,30 @@ export function formatClock(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+/**
+ * 长时间跨度（睡眠定时倒计时）的显示格式：满 1 小时进位成 `h:mm:ss`。
+ *
+ * 为什么不直接用 formatClock：它是「歌曲进度」的格式，左右两端跟进度条对齐，
+ * 那边最长也就几十分钟，`m:ss` 才是对的。而睡眠定时最长可到 720 分钟，
+ * 拿 formatClock 会得到 `719:59` 这种又宽又难读的串 —— 播放页药丸只有 20 高、
+ * 两侧还挤着当前位置/总时长，多出来的两位数字正是最容易把它挤乱的地方。
+ * 进位成 `1:59:59` 后宽度反而稳定：小时位最多一位，三位数字就是上限。
+ *
+ * 不足 1 小时仍返回 `m:ss`（没有前导 0 的小时），与进度条那套保持不变。
+ */
+export function formatLongClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours <= 0) {
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 export function formatPlayCount(value: unknown): string {
   const count =
     typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : 0;

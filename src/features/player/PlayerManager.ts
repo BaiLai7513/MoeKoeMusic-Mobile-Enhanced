@@ -82,6 +82,8 @@ type MoeKoePlayerModule = {
   resume(): Promise<boolean>;
   stop(): Promise<boolean>;
   seekTo(positionMs: number): Promise<boolean>;
+  setRate(rate: number): Promise<boolean>;
+  setVolume(volume: number): Promise<boolean>;
   getState(): Promise<NativePlayerState | null>;
 };
 
@@ -264,6 +266,24 @@ export const PlayerManager = {
 
   seekToMs(positionMs: number): Promise<void> {
     return guarded('seekTo', () => native!.seekTo(positionMs));
+  },
+
+  /**
+   * 倍速播放。
+   *
+   * 换歌**不会**自动保留倍速：playbackSpeed 是媒体会话级的属性，服务重建 / 播放列表
+   * 重新下发后可能回到 1.0×，所以 `store.ts` 在「开始播放」时会再调一次这里。
+   */
+  setRate(rate: number): Promise<void> {
+    return guarded('setRate', () => native!.setRate(rate));
+  },
+
+  /**
+   * 音量（0~1）。目前只给睡眠定时的淡出用 —— 淡出到 0 之后一定要记得还原成 1，
+   * 否则下一次播放就是「在放但没声音」。
+   */
+  setVolume(volume: number): Promise<void> {
+    return guarded('setVolume', () => native!.setVolume(volume));
   },
 
   /** 冷启对齐 / 进度轮询用；原生不可用或出错时一律返回 null，不抛错。 */

@@ -8,6 +8,7 @@ import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { MiniPlayer, MINI_PLAYER_HEIGHT } from '@/components/ui/mini-player';
 import { SongListItem } from '@/components/ui/song-list-item';
+import { withAlpha } from '@/constants/accents';
 import { MaxContentWidth } from '@/constants/theme';
 import { scanLocalMusic } from '@/features/local/local-music';
 import { playCollection } from '@/features/player/play-collection';
@@ -74,8 +75,15 @@ export default function LocalMusicScreen() {
 
   return (
     <View flex={1} backgroundColor={palette.background}>
+      {/*
+        顶部光晕同样跟随主题色。
+        原来这里是写死的两种粉：light 'rgba(255, 92, 158, 0.14)'、dark 'rgba(255, 126, 182, 0.16)'
+        —— 正好是默认「樱花粉」的 accent 值。换成蓝/紫/绿主题后，页面最上面这条底色
+        仍然是粉的，跟下面「播放全部」的 accent 对不上，看着像换主题没生效。
+        withAlpha 负责把当前 accent 转成同透明度的 rgba，透明度沿用原来那两个数。
+      */}
       <LinearGradient
-        colors={[isDark ? 'rgba(255, 126, 182, 0.16)' : 'rgba(255, 92, 158, 0.14)', 'transparent']}
+        colors={[withAlpha(palette.accent, isDark ? 0.16 : 0.14), 'transparent']}
         style={styles.headerGlow}
       />
 

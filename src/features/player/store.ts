@@ -1,6 +1,8 @@
 import { AppState } from 'react-native';
 import { useSyncExternalStore } from 'react';
 
+import { getCurrentPlaybackRate, settingsActions } from '@/features/settings/store';
+
 import {
   buildQueueItem,
   onNativeCommand,
@@ -11,6 +13,7 @@ import {
   type NativeQueueItem,
 } from './PlayerManager';
 import { loadLyricLines } from './lyrics';
+import type { PlaybackRate } from './playback-rate';
 import { PlaybackUnavailableError, resolveSongSource } from './song-url';
 import type { LyricLine, LyricsStatus, PlayMode, PlayerTrack } from './types';
 
@@ -139,6 +142,23 @@ export function onPlaybackStart(listener: () => void): () => void {
     playbackStartListeners.delete(listener);
   };
 }
+
+// ---------------- 开播后重新贴一次倍速 ----------------
+//
+// playbackSpeed 是**媒体会话级**的属性，不是 MediaItem 的属性：服务被系统回收后重连、
+// 播放列表重新下发、进程重启，它都会回到 1.0×；而用户存的倍速平时只在点档位时下发一次。
+// 不在这里补一次，用户看到的就是「设置里明明是 1.5×，放出来的却是原速」，
+// 且只在「第二首」「息屏被杀后重开」这类场景复现，很难自己归因。
+//
+// 为什么挂在「开始播放」而不是 loadTrackAt：系统侧切歌（锁屏/耳机/通知栏）走的是
+// applyNativeState → adoptNativeIndex，**压根不经过 loadTrackAt**，只在那里贴会漏掉一半路径。
+//
+// 同一个钩子顺手把音量还原成 1：睡眠定时是「淡出到 0 再暂停」，
+// 之后无论是系统拉起还是用户手动继续播，音量还停在 0 就是「在放但没声音」。
+onPlaybackStart(() => {
+  void PlayerManager.setRate(getCurrentPlaybackRate());
+  void PlayerManager.setVolume(1);
+});
 
 let loadSequence = 0;
 let failStreak = 0;
@@ -710,6 +730,17 @@ export function isCurrentQueueGeneration(expected: number): boolean {
   return expected === queueGeneration;
 }
 
+/**
+ * 同步读当前曲目（给**非 React** 的订阅方用，目前是 listen-report）。
+ *
+ * 为什么需要它：听歌时长上报要拿 `track.albumAudioId`（酷狗 MixSongID），
+ * 而原生状态事件里只有曲目 hash（`mediaId`）。上报引擎不是组件，不能调 `usePlayer`
+ * 这个 hook，所以在这里开一个只读出口 —— 不新增状态、不触发重渲染。
+ */
+export function getCurrentPlayerTrack(): PlayerTrack | null {
+  return playerStore.getState().track;
+}
+
 export const playerActions = {
   async loadLyrics() {
     const { track, lyricsStatus } = playerStore.getState();
@@ -853,6 +884,17 @@ export const playerActions = {
     playerStore.setState({ mode: next });
     void PlayerManager.setPlaybackMode(next);
     return next;
+  },
+
+  /**
+   * 切换播放倍速。
+   *
+   * 设置与原生必须一起写：只写设置的话当前这首不会变速（用户以为没生效），
+   * 只调原生的话下次启动就丢了。两者都不抛错（guarded），所以这里是同步返回。
+   */
+  setRate(rate: PlaybackRate) {
+    settingsActions.setPlaybackRate(rate);
+    void PlayerManager.setRate(rate);
   },
 
   async jumpTo(index: number) {

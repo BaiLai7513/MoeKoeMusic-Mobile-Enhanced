@@ -9,6 +9,7 @@ import { TamaguiProvider } from 'tamagui';
 import { hydrateSettings, useSettingsHydrated } from '@/features/settings/store';
 import { syncFromStorage } from '@/features/account/vip-claim-state';
 import { attachVipClaimToPlayback } from '@/features/account/vip-play-claim';
+import { attachListenReport } from '@/features/player/listen-report';
 import { ToastHost } from '@/components/ui/toast';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { tamaguiConfig } from '../../tamagui.config';
@@ -22,6 +23,10 @@ void syncFromStorage();
 // 启动即打领取接口的节奏太像脚本（实测会被判风控），而且用户开 App 不等于要听歌。
 // 这里只做接线，具体节流与接口边界见 vip-play-claim / vip-silent-claim。
 attachVipClaimToPlayback();
+// 听歌时长同步：同样是接线，不是组件。开关默认关闭，关闭时连原生状态监听都不会挂
+// （所以「关闭 → 一次请求都不发」是结构性的，不靠分支判断）。频率与防风险约定见
+// listen-report 的文件头。
+attachListenReport();
 
 export default function RootLayout() {
   const hydrated = useSettingsHydrated();

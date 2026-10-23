@@ -58,6 +58,12 @@ class MusicPlayerService : MediaSessionService() {
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                // 倍速与音量（睡眠定时淡出）也显式声明一遍：
+                // 会话会把「自己声明的命令」与「Player 真正支持的」取交集，
+                // 少声明一条，MediaController 侧对应调用就会被静默拒绝 ——
+                // 表现是「JS 里调了 setRate，一点反应都没有，也不报错」。
+                .add(Player.COMMAND_SET_SPEED_AND_PITCH)
+                .add(Player.COMMAND_SET_VOLUME)
                 .build()
 
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
