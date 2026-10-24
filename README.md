@@ -45,31 +45,7 @@
 
 ## 一些值得记录的坑
 
-如果你也在做类似的改造，这几条可能会帮你省下几天：
-
-**1. 播放缓存的键必须是歌曲 hash，不能用 URI。**
-酷狗直链形如 `/202610101256/…`，每次都不同。以 URL 为键 → 缓存目录一直在长，但**永远不命中**。
-
-**2. `SimpleCache` 必须进程内单例。**
-它会锁定目录，同目录创建第二个实例直接抛异常（播放服务被系统重建时就会踩到）。
-
-**3. 系统媒体卡片的「上/下一首」取决于 `hasNextMediaItem()`。**
-只在 `onConnect` 里声明命令没用 —— media3 会与 Player 真实能力取交集。**播放列表必须真的有长度**（未解析的用占位 URI）。
-
-**4. 随机模式下要按 `nextMediaItemIndex` 预解析。**
-否则自然播完时必然撞上未解析的占位符，而 ExoPlayer 默认退避重试约 7 秒 —— 观感就是「一首放完卡住」。
-
-**5. `@ReactMethod` 不能用表达式体。**
-`= mainHandler.post { }` 会让返回类型变成 `Boolean`，TurboModule 会当成同步方法并崩溃：
-`TurboModule system assumes returnType == void iff the method is synchronous`。
-
-**6. 请求必须显式设超时。**
-axios 默认 `timeout: 0` = **永不超时**。没网时请求一直挂着、所有页面停在加载态 —— 表现就是「App 彻底歇菜」。
-
-**7. `expo prebuild` 会清空 `android/`。**
-所有原生改动都必须走 config plugin；`debug.keystore` 也要一并管理，否则签名变化会让老用户无法覆盖升级。
-
-> 更完整的记录（「现象 → 根因 → 解法」、设计思路、改善方向）见 [开发文档.md](开发文档.md)。
+> 完整的记录（「现象 → 根因 → 解法」、设计思路、改善方向）见 [开发文档.md](开发文档.md)。
 
 ---
 
