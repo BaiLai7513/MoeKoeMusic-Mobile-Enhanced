@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { startTransition, useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View as RNView } from 'react-native';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, FlatList, Keyboard, StyleSheet, TextInput, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
@@ -10,6 +10,7 @@ import { Artwork } from '@/components/ui/artwork';
 import { BatchDownloadBar } from '@/components/ui/batch-download-bar';
 import { MiniPlayer, MINI_PLAYER_HEIGHT } from '@/components/ui/mini-player';
 import { SongListItem } from '@/components/ui/song-list-item';
+import { showToast } from '@/components/ui/toast';
 import { TouchText } from '@/components/ui/touch-text';
 import { TrackActionsSheet } from '@/components/ui/track-actions-sheet';
 import { MaxContentWidth } from '@/constants/theme';
@@ -38,6 +39,13 @@ type ScreenState = {
   error: string;
 };
 
+/**
+ * 筛选时自动补齐分页的安全上限，与 play-collection 的 MAX_FILL_PAGES 同口径：
+ * 80 页 × 50 首 = 4000 首，已超出酷狗歌单容量上限。
+ * 接口异常地一直声称"还有下一页"时不至于无限请求；到顶后仍可手动上滑加载。
+ */
+const SEARCH_FILL_MAX_PAGES = 80;
+
 export default function PlaylistScreen() {
   const palette = usePalette();
   const isDark = useIsDark();
@@ -59,28 +67,174 @@ export default function PlaylistScreen() {
     error: '',
   });
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
+  // 歌单内搜索：默认收起（不占列表高度），点右上角放大镜才展开
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  // 批量移除进行中：批量条会显示 spinner，同时挡住重复确认
+  const [removing, setRemoving] = useState(false);
 
   const library = useLibrary();
   // 自己的歌单(含"我喜欢")才允许移除歌曲;listid 是写操作专用 ID
-  const ownPlaylist = library.playlists.find((item) => item.gid === playlistId && item.isMine);
+  const ownPlaylist =
+    library.playlists.find((item) => item.gid === playlistId && item.isMine) ?? null;
+  const likePlaylist = library.playlists.find((item) => item.isLike) ?? null;
+  /*
+   * 「我喜欢」也要能移除歌曲（取消喜欢），但它是否被标成 isMine 取决于服务端
+   * list_create_userid 是否等于当前账号。为了不让入口依赖这个字段，
+   * 额外按 isLike + gid 兜底一次；普通自建歌单仍然只认 isMine。
+   */
+  const removablePlaylist =
+    ownPlaylist ?? (likePlaylist?.gid === playlistId ? likePlaylist : null);
   const batch = useBatchSelect();
   const batchTracks = state.tracks.filter((item) => batch.selectedSet.has(item.hash));
-  const canBatch = isDownloadSupported() && state.tracks.length > 0;
+  /*
+   * 批量条的可用条件：能下载 **或** 能移除，任一即可。
+   * 原条件只看下载能力，会导致非 Android / 原生模块缺失时根本进不了多选，
+   * 连带把「批量移除」也锁死；但移除走的是普通网络接口，和系统下载器无关。
+   */
+  const canBatch =
+    state.tracks.length > 0 && (isDownloadSupported() || Boolean(removablePlaylist));
+
+  const trimmedKeyword = keyword.trim();
+  const loweredKeyword = trimmedKeyword.toLowerCase();
+  const filtering = loweredKeyword.length > 0;
+
+  // 只过滤「显示」用的行，并顺手记住每首歌在原始列表里的下标。
+  // 序号和播放起点都必须按原始队列算 —— 过滤后的位置只用于渲染。
+  const rows = useMemo(() => {
+    const all = state.tracks.map((track, index) => ({ track, index }));
+    if (!loweredKeyword) {
+      return all;
+    }
+    return all.filter(({ track }) => {
+      return (
+        track.title.toLowerCase().includes(loweredKeyword) ||
+        track.artist.toLowerCase().includes(loweredKeyword) ||
+        (track.album ? track.album.toLowerCase().includes(loweredKeyword) : false)
+      );
+    });
+  }, [state.tracks, loweredKeyword]);
+
+  const totalCount = state.info?.count || state.tracks.length;
+  const countText = totalCount
+    ? filtering
+      ? `共 ${totalCount} 首 · 匹配 ${rows.length} 首`
+      : `共 ${totalCount} 首`
+    : '';
 
   useEffect(() => {
     void libraryActions.ensure().catch(() => undefined);
   }, []);
 
-  function handleTrackRemoved(removed: PlayerTrack) {
-    setState((current) => ({
-      ...current,
-      tracks: current.tracks.filter((item) =>
-        removed.fileid ? item.fileid !== removed.fileid : item.hash !== removed.hash
-      ),
-      info: current.info
-        ? { ...current.info, count: Math.max(0, current.info.count - 1) }
-        : current.info,
-    }));
+  function closeSearch() {
+    setSearchOpen(false);
+    setKeyword('');
+    Keyboard.dismiss();
+  }
+
+  function toggleSearch() {
+    if (searchOpen) {
+      closeSearch();
+    } else {
+      setSearchOpen(true);
+    }
+  }
+
+  function clearKeyword() {
+    setKeyword('');
+  }
+
+  /** 空结果里的「清除筛选」：顺手收起键盘，好让用户马上看到完整列表。 */
+  function clearFilter() {
+    setKeyword('');
+    Keyboard.dismiss();
+  }
+
+  /**
+   * 批量移除的二次确认。
+   *
+   * 和单曲删除一样用原生 Alert + `style: 'destructive'`：
+   * 批量移除不可撤销，必须把「几首」和「从哪个歌单」说清楚，
+   * 不能只靠按钮上的一个图标让用户猜。
+   */
+  function confirmBatchRemove() {
+    if (!removablePlaylist || removing) {
+      return;
+    }
+
+    const targets = batchTracks.filter((track) => Boolean(track.fileid));
+    if (!targets.length) {
+      showToast('缺少歌曲信息，无法移除');
+      return;
+    }
+
+    const isLike = removablePlaylist.isLike;
+    Alert.alert(
+      isLike ? '取消喜欢' : '从歌单移除',
+      isLike
+        ? `确定取消喜欢选中的 ${targets.length} 首歌？取消后它们会从「我喜欢」中移除。`
+        : `确定从「${removablePlaylist.name}」移除选中的 ${targets.length} 首歌？此操作不可撤销。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: isLike ? '取消喜欢' : '移除',
+          style: 'destructive',
+          onPress: () => void handleBatchRemove(targets),
+        },
+      ]
+    );
+  }
+
+  /**
+   * 批量移除选中歌曲。
+   *
+   * 「我喜欢」和普通自建歌单走不同的 library action：
+   * - 喜欢 = 取消收藏（store 里用「我喜欢」歌单的 listid 走收藏那套语义，并同步 liked 映射）；
+   * - 其他 = 从自建歌单删歌。
+   * 底层都落到同一个云端删歌接口（酷狗没有独立的取消喜欢接口），
+   * 但状态同步不同，所以不在页面里直接调 removeTracksFromPlaylist。
+   */
+  async function handleBatchRemove(targets: PlayerTrack[]) {
+    const playlist = removablePlaylist;
+    if (!playlist || removing) {
+      return;
+    }
+
+    setRemoving(true);
+    try {
+      if (playlist.isLike) {
+        await libraryActions.removeLikedTracks(targets);
+      } else {
+        await libraryActions.removeFromPlaylist(playlist.listid, targets);
+      }
+
+      // 页面自己的列表同步：按 fileid 精确删（同 hash 的不同版本不能误伤）
+      const removedFileids = new Set(targets.map((track) => track.fileid));
+      setState((current) => ({
+        ...current,
+        tracks: current.tracks.filter(
+          (item) => !(item.fileid && removedFileids.has(item.fileid))
+        ),
+        info: current.info
+          ? {
+              ...current.info,
+              count: Math.max(0, current.info.count - targets.length),
+            }
+          : current.info,
+      }));
+      // 批量删完还要保持多选态没有意义，直接退出并清空勾选
+      batch.exit();
+      showToast(
+        playlist.isLike
+          ? `已取消喜欢 ${targets.length} 首`
+          : `已从歌单移除 ${targets.length} 首`
+      );
+    } catch (error) {
+      // 失败时保留勾选：用户可以直接重试，不用重新一首首点
+      showToast(error instanceof Error ? error.message : '移除失败');
+    } finally {
+      setRemoving(false);
+    }
   }
 
   useEffect(() => {
@@ -176,7 +330,36 @@ export default function PlaylistScreen() {
     }
   }
 
-  /** 从第 index 首开始播放整个歌单：先播已加载的，后台补齐剩余分页到队列。 */
+  /*
+   * 本地过滤只能看到已经拉下来的分页：154 首的歌单刚打开时只有第一页（50 首），
+   * 若只过滤已加载部分，会漏掉后面几页里明明存在的歌。
+   * 所以一进入筛选状态就按页把剩余分页补齐；loadPage 自带请求序号校验和按 hash 去重，
+   * 与「播放全部」的后台补页是同一口径。成本也就和点一次“播放全部”相当。
+   *
+   * 不把 loadPage 放进依赖：它每次渲染都是新函数，放进去会在每帧重复触发补页；
+   * 其余依赖（页码/加载态/hasMore）变化后自然会继续拉下一页。
+   */
+  useEffect(() => {
+    // page < 1：首页都没成功过（可能正在报错重试），不能在这里自己再发起第 1 页，
+    // 否则失败后 loading 由 true 变回 false 会让这个 effect 反复重试。
+    if (!filtering || state.page < 1 || state.page >= SEARCH_FILL_MAX_PAGES || !state.hasMore) {
+      return;
+    }
+    if (state.loading || state.loadingMore) {
+      return;
+    }
+    void loadPage(state.page + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtering, state.page, state.hasMore, state.loading, state.loadingMore]);
+
+  /**
+   * 从第 index 首开始播放整个歌单：先播已加载的，后台补齐剩余分页到队列。
+   * index 永远是**原始曲目列表**里的下标（过滤只换显示行，见 renderItem）。
+   *
+   * 「播放全部」刻意不受筛选影响，始终播完整歌单：
+   * 筛选只是查找辅助，若因此把队列悄悄缩小，同一个按钮在筛选前后行为就不一致，
+   * 用户清掉关键字后很容易误以为播的还是刚才那批歌，反而容易漏播。
+   */
   function playFrom(index: number) {
     void playCollection({
       tracks: state.tracks,
@@ -202,9 +385,12 @@ export default function PlaylistScreen() {
       />
 
       <FlatList
-        data={state.tracks}
-        keyExtractor={(item, index) => `${item.hash}-${index}`}
+        data={rows}
+        keyExtractor={(item) => `${item.track.hash}-${item.index}`}
         showsVerticalScrollIndicator={false}
+        // 搜索时点歌不该先被键盘「吃掉」一次触摸；滑列表则顺手收起键盘
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         onEndReachedThreshold={0.5}
         onEndReached={() => {
           if (state.hasMore && !state.loading && !state.loadingMore) {
@@ -221,20 +407,94 @@ export default function PlaylistScreen() {
         }}
         ListHeaderComponent={
           <YStack gap={18} paddingHorizontal={4} paddingBottom={16}>
-            <XStack
-              width={38}
-              height={38}
-              borderRadius={19}
-              alignItems="center"
-              justifyContent="center"
-              backgroundColor={palette.card}
-              borderWidth={StyleSheet.hairlineWidth}
-              borderColor={palette.border}
-              transition="quickest"
-              pressStyle={{ opacity: 0.6, scale: 0.94 }}
-              onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={20} color={palette.text} />
+            <XStack alignItems="center" justifyContent="space-between">
+              <XStack
+                width={38}
+                height={38}
+                borderRadius={19}
+                alignItems="center"
+                justifyContent="center"
+                backgroundColor={palette.card}
+                borderWidth={StyleSheet.hairlineWidth}
+                borderColor={palette.border}
+                transition="quickest"
+                pressStyle={{ opacity: 0.6, scale: 0.94 }}
+                onPress={() => router.back()}>
+                <Ionicons name="chevron-back" size={20} color={palette.text} />
+              </XStack>
+
+              {/* 热区 44×44，视觉仍是 38 的圆，和返回键对称；展开后图标变 × 以便收起 */}
+              <XStack
+                width={44}
+                height={44}
+                alignItems="center"
+                justifyContent="center"
+                transition="quickest"
+                pressStyle={{ opacity: 0.6, scale: 0.94 }}
+                onPress={toggleSearch}>
+                <XStack
+                  width={38}
+                  height={38}
+                  borderRadius={19}
+                  alignItems="center"
+                  justifyContent="center"
+                  backgroundColor={searchOpen ? palette.accentSoft : palette.card}
+                  borderWidth={StyleSheet.hairlineWidth}
+                  borderColor={searchOpen ? palette.accentBorder : palette.border}>
+                  <Ionicons
+                    name={searchOpen ? 'close' : 'search'}
+                    size={19}
+                    color={searchOpen ? palette.accent : palette.text}
+                  />
+                </XStack>
+              </XStack>
             </XStack>
+
+            {/* 搜索框只在展开时占位，收起时完全不占高度，不挤压原有头部 */}
+            {searchOpen ? (
+              <XStack
+                alignItems="center"
+                gap={8}
+                height={44}
+                paddingHorizontal={14}
+                borderRadius={22}
+                backgroundColor={palette.card}
+                borderWidth={StyleSheet.hairlineWidth}
+                borderColor={palette.border}>
+                <Ionicons name="search" size={17} color={palette.textTertiary} />
+                <TextInput
+                  value={keyword}
+                  onChangeText={setKeyword}
+                  placeholder="搜索歌单内歌曲、歌手"
+                  placeholderTextColor={palette.textTertiary}
+                  autoFocus
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  style={[styles.searchInput, { color: palette.text }]}
+                />
+                {keyword ? (
+                  <XStack
+                    width={44}
+                    height={44}
+                    marginRight={-12}
+                    alignItems="center"
+                    justifyContent="center"
+                    transition="quickest"
+                    pressStyle={{ opacity: 0.6 }}
+                    onPress={clearKeyword}>
+                    <XStack
+                      width={22}
+                      height={22}
+                      borderRadius={11}
+                      alignItems="center"
+                      justifyContent="center"
+                      backgroundColor={palette.cardAlt}>
+                      <Ionicons name="close" size={13} color={palette.textSecondary} />
+                    </XStack>
+                  </XStack>
+                ) : null}
+              </XStack>
+            ) : null}
 
             <XStack gap={16} alignItems="center">
               <Artwork uri={coverUrl} size={112} radius={20} />
@@ -248,13 +508,21 @@ export default function PlaylistScreen() {
                   </Text>
                 ) : null}
                 <Text color={palette.textTertiary} fontSize={12}>
-                  {state.info?.count ? `共 ${state.info.count} 首` : ''}
+                  {countText}
                 </Text>
               </YStack>
             </XStack>
 
+            {/*
+              这里原先还有一个「删除」按钮，现已移除：删歌单是低频且不可撤销的操作，
+              入口统一放在「我的」页（长按/更多 → playlist-remove-sheet），
+              详情页再放一个就是同一件事两个入口，容易误触。
+              剩下的播放/多选都只有在有歌时才有意义，所以条件收回 tracks.length；
+              空歌单整行不渲染，也不会留下一条空白间距。
+            */}
             {state.tracks.length ? (
               <XStack alignSelf="flex-start" alignItems="center" gap={10}>
+                {/* 筛选只影响列表显示：这里仍从原始第 0 首播完整队列（见 playFrom） */}
                 <XStack
                   alignItems="center"
                   gap={7}
@@ -295,10 +563,31 @@ export default function PlaylistScreen() {
           </YStack>
         }
         ListEmptyComponent={
-          state.loading ? (
+          state.loading && !state.tracks.length ? (
             <YStack alignItems="center" paddingVertical={70}>
               <Spinner size="large" color={palette.accent} />
             </YStack>
+          ) : state.tracks.length ? (
+            // 有歌却一行都没有 = 筛选没命中。分页还没补齐时先转圈，
+            // 否则会错报「没有匹配」——歌可能就在后面的页里。
+            filtering && state.hasMore && state.page < SEARCH_FILL_MAX_PAGES ? (
+              <YStack alignItems="center" paddingVertical={60} gap={10}>
+                <Spinner color={palette.accent} />
+                <Text color={palette.textTertiary} fontSize={13}>
+                  正在加载剩余歌曲…
+                </Text>
+              </YStack>
+            ) : (
+              <YStack alignItems="center" paddingVertical={60} gap={10} paddingHorizontal={28}>
+                <Ionicons name="search" size={34} color={palette.textTertiary} />
+                <Text color={palette.textTertiary} fontSize={13} textAlign="center">
+                  没有匹配的歌曲
+                </Text>
+                <TouchText onPress={clearFilter} fontSize={14}>
+                  清除筛选
+                </TouchText>
+              </YStack>
+            )
           ) : state.error ? (
             <YStack alignItems="center" paddingVertical={60} gap={12} paddingHorizontal={28}>
               <Ionicons name="cloud-offline-outline" size={36} color={palette.textTertiary} />
@@ -320,21 +609,26 @@ export default function PlaylistScreen() {
         }
         ListFooterComponent={
           state.loadingMore ? (
-            <XStack justifyContent="center" paddingVertical={16}>
+            <XStack justifyContent="center" alignItems="center" gap={8} paddingVertical={16}>
               <Spinner color={palette.accent} />
+              {filtering ? (
+                <Text color={palette.textTertiary} fontSize={12}>
+                  正在加载剩余歌曲…
+                </Text>
+              ) : null}
             </XStack>
           ) : null
         }
-        renderItem={({ item, index }) => (
+        renderItem={({ item }) => (
           <SongListItem
-            track={item}
-            rank={index + 1}
-            active={item.hash === activeHash}
-            onPress={() => playFrom(index)}
-            onMore={() => setActionTrack(item)}
+            track={item.track}
+            rank={item.index + 1}
+            active={item.track.hash === activeHash}
+            onPress={() => playFrom(item.index)}
+            onMore={() => setActionTrack(item.track)}
             selectMode={batch.selectMode}
-            selected={batch.selectedSet.has(item.hash)}
-            onToggleSelect={() => batch.toggle(item.hash)}
+            selected={batch.selectedSet.has(item.track.hash)}
+            onToggleSelect={() => batch.toggle(item.track.hash)}
           />
         )}
       />
@@ -347,14 +641,11 @@ export default function PlaylistScreen() {
           }
         }}
         track={actionTrack}
-        removal={
-          ownPlaylist
-            ? { listid: ownPlaylist.listid, onRemoved: handleTrackRemoved }
-            : undefined
-        }
       />
 
       {/* 多选时隐藏 MiniPlayer 并换成批量操作条，避免两个底部浮层打架 */}
+      {/* 全选/批量移除始终针对完整曲目列表：筛选只是少显示几行，
+          不能让「全选」悄悄变成只选筛选结果，操作范围必须可预期 */}
       {batch.selectMode ? (
         <BatchDownloadBar
           tracks={batchTracks}
@@ -362,6 +653,9 @@ export default function PlaylistScreen() {
           bottomInset={insets.bottom}
           onSelectAll={() => batch.toggleAll(state.tracks)}
           onCancel={batch.exit}
+          // 只有能改动歌曲的歌单（自建/「我喜欢」）才给移除入口
+          onRemove={removablePlaylist ? confirmBatchRemove : undefined}
+          removing={removing}
         />
       ) : (
         <RNView
@@ -377,6 +671,16 @@ export default function PlaylistScreen() {
 }
 
 const styles = StyleSheet.create({
+  // 与 search.tsx 的搜索输入保持一致：撑满 44 高的胶囊，Android 垂直居中
+  searchInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 15,
+    fontWeight: '500',
+    paddingTop: 2,
+    paddingBottom: 0,
+    textAlignVertical: 'center',
+  },
   headerGlow: {
     position: 'absolute',
     top: 0,

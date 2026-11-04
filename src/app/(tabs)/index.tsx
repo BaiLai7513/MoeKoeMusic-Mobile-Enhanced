@@ -35,6 +35,13 @@ type ScreenState = {
 
 const DAILY_COLUMN_SIZE = 6;
 
+/*
+ * 每日推荐列与列之间的间距。
+ * 它既用于样式，也要计入横向分页的吸附步长，所以抽成常量：
+ * 两处必须是同一个值，否则吸附点每翻一页会累积偏移（少算 gap 就是每页偏 12px）。
+ */
+const DAILY_COLUMN_GAP = 12;
+
 function chunkSongs<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -203,6 +210,22 @@ export default function HomeScreen() {
   const activeHash = track?.hash;
   const dailyColumns = chunkSongs(homeData.dailySongs, DAILY_COLUMN_SIZE);
 
+  /*
+   * 横向分页的吸附步长 = 一页宽 + 列间距。
+   *
+   * 每列 width 是 contentWidth，列与列之间还有 DAILY_COLUMN_GAP，所以第 n 列的左边缘在
+   * n * (contentWidth + gap)，吸附必须按这个步长走，滑一次才刚好平移一整列。
+   * 这也是不能用 pagingEnabled 的原因：pagingEnabled 按「可视宽度」翻页，而这里可视宽度
+   * 正好是 contentWidth（外层 content 的左右 16 已经扣掉了），不含 gap，于是每翻一页少走
+   * 12px，翻到第 3、4 页就会停在两列中间 —— 正是「展示不全」的来源。
+   *
+   * 步长从根容器 onLayout 实测出来的 contentWidth 推导，不读 useWindowDimensions：
+   * 分屏/自由小窗改变窗口尺寸时 contentWidth 会变，步长自动跟着变，无需额外监听。
+   */
+  const dailyPageStride = contentWidth + DAILY_COLUMN_GAP;
+  // 只有一列时没有「下一页」，禁掉横向滚动，避免多余的回弹/拖动。
+  const dailyPageable = dailyColumns.length > 1;
+
   return (
     <View flex={1} backgroundColor={palette.background} onLayout={handleRootLayout}>
       <ScrollView
@@ -273,9 +296,15 @@ export default function HomeScreen() {
               actionLabel="播放全部"
               onAction={() => void playerActions.playTracks(homeData.dailySongs, 0)}
             />
+            {/* 横向分页：按「一页宽 + gap」吸附，一次手势只平移一整列。 */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              scrollEnabled={dailyPageable}
+              snapToInterval={dailyPageStride}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              disableIntervalMomentum
               contentContainerStyle={styles.dailyColumns}>
               {dailyColumns.map((column, columnIndex) => (
                 <YStack
@@ -328,7 +357,11 @@ const styles = StyleSheet.create({
     gap: 22,
   },
   dailyColumns: {
-    gap: 12,
-    paddingRight: 4,
+    gap: DAILY_COLUMN_GAP,
+    /*
+     * 末尾不再留 paddingRight：内容总宽 = n 页 + (n-1) 个 gap，
+     * 最大滚动量正好是 (n-1) 个步长，最后一页才能精确停在左边缘、右边不露背景。
+     * 有尾部 padding 时最大滚动量会多出那几个像素，从最后一页再往前拖会「多滑一点」露白。
+     */
   },
 });

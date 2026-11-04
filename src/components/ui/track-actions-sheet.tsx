@@ -1,8 +1,16 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Sheet, Spinner, Text, XStack, YStack } from 'tamagui';
+import { Spinner, Text, XStack, YStack } from 'tamagui';
 
 import { Artwork } from '@/components/ui/artwork';
 import { showToast } from '@/components/ui/toast';
@@ -27,10 +35,13 @@ import { shareTrack } from '@/lib/share';
  * 切换视图时 Sheet 必然会**重新测量并动画到新高度**，肉眼就是一次闪烁。
  *
  * 把三种视图的高度钉成同一个值后，切换时不存在任何高度变化，闪烁从根上消失。
- * 取 260 = 上下留白(6) + 5 行操作(5×50)，正好是「操作菜单」最满时的尺寸，
+ * 取 210 = 上下留白(6) + 4 行操作(4×50) + 4 余量，正好是「操作菜单」最满时的尺寸，
  * 其余视图不足的部分由留白补齐，超出的部分在视图内滚动。
+ *
+ * 单曲「从歌单移除」已并入多选批量移除，操作行由 5 行减为 4 行，
+ * 高度同步收窄 —— 否则操作菜单底部会空出一整行，看起来像少了内容。
  */
-const SHEET_CONTENT_HEIGHT = 260;
+const SHEET_CONTENT_HEIGHT = 210;
 
 /**
  * Sheet 各段固定高度，用于**显式算出整体高度**（配合 snapPointsMode="constant"）。
@@ -102,6 +113,31 @@ function ActionRow({
 const ACTION_ROW_HEIGHT = 50;
 const ACTION_ICON_SIZE = 26;
 
+/**
+ * 新建歌单面板各段的**固定高度**，显式相加得到面板总高（不做任何内容测量）。
+ *
+ * 这个面板没有列表、没有异步视图，内容恒为「把手 + 标题 + 输入框 + 两个按钮」，
+ * 所以高度可以一次算死。改样式时这几个常量要和下面 JSX 里的 padding/gap 一起改，
+ * 否则内容会被裁掉或多出一截底部留白。
+ */
+const CREATE_PANEL_HANDLE_HEIGHT = 20;
+const CREATE_PANEL_PADDING_TOP = 12;
+const CREATE_PANEL_TITLE_HEIGHT = 24;
+const CREATE_PANEL_GAP = 16;
+const CREATE_PANEL_INPUT_HEIGHT = 46;
+const CREATE_PANEL_BUTTON_HEIGHT = 44;
+const CREATE_PANEL_PADDING_BOTTOM = 12;
+
+/** 内容区总高 = 上下 padding + 三段控件 + 两个 gap。 */
+const CREATE_PANEL_CONTENT_HEIGHT =
+  CREATE_PANEL_PADDING_TOP +
+  CREATE_PANEL_TITLE_HEIGHT +
+  CREATE_PANEL_GAP +
+  CREATE_PANEL_INPUT_HEIGHT +
+  CREATE_PANEL_GAP +
+  CREATE_PANEL_BUTTON_HEIGHT +
+  CREATE_PANEL_PADDING_BOTTOM;
+
 /** 新建歌单弹窗;创建成功后回调新歌单 listid。 */
 export function CreatePlaylistSheet({
   open,
@@ -112,6 +148,8 @@ export function CreatePlaylistSheet({
 }) {
   const palette = usePalette();
   const insets = useSafeAreaInsets();
+  /** 只为了在 Modal 展示完后兜底聚焦输入框（见下面 onShow 的注释）。 */
+  const inputRef = useRef<TextInput>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
@@ -143,119 +181,159 @@ export function CreatePlaylistSheet({
     }
   }
 
+  /**
+   * 面板总高：把手 + 内容区 + 底部安全区。
+   *
+   * 全部是常量相加，**首帧就是最终高度** —— 没有「先测量、再修正」的第二帧。
+   * 这也是和 TrackActionsSheet 一致的做法：它那边的注释里记过实测序列
+   * 353 → 35 → 370（fit 模式先塌再撑），这里从根上不会出现。
+   */
+  const bottomPadding = Math.max(insets.bottom, 16) + 6;
+  const panelHeight = CREATE_PANEL_HANDLE_HEIGHT + CREATE_PANEL_CONTENT_HEIGHT + bottomPadding;
+
   return (
     <Modal
       visible={open}
       transparent
       statusBarTranslucent
       navigationBarTranslucent
-      animationType="none"
-      onRequestClose={() => onOpenChange(false)}>
-      <Sheet
-        modal={false}
-        open={open}
-        onOpenChange={onOpenChange}
-        snapPointsMode="fit"
-        dismissOnSnapToBottom
-        moveOnKeyboardChange
-        transition="medium"
-        zIndex={110000}>
-        <Sheet.Overlay
-          transition="quick"
-          backgroundColor="rgba(8, 8, 14, 0.42)"
-          enterStyle={{ opacity: 0 }}
-          exitStyle={{ opacity: 0 }}
-        />
-        <Sheet.Handle backgroundColor={palette.cardAlt} width={40} alignSelf="center" />
-        <Sheet.Frame
-          backgroundColor={palette.card}
-          borderTopLeftRadius={26}
-          borderTopRightRadius={26}
-          paddingTop="$3"
-          paddingHorizontal="$4"
-          paddingBottom={Math.max(insets.bottom, 16) + 8}>
-          <YStack gap={16}>
-            <Text color={palette.text} fontSize={17} fontWeight="700">
-              新建歌单
-            </Text>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="歌单名称"
-              placeholderTextColor={palette.textTertiary}
-              autoFocus
-              maxLength={40}
-              returnKeyType="done"
-              onSubmitEditing={() => void handleCreate()}
-              style={[
-                styles.input,
-                {
-                  color: palette.text,
-                  backgroundColor: palette.cardAlt,
-                  borderColor: palette.border,
-                },
-              ]}
-            />
-            <XStack gap={12}>
-              <XStack
-                flex={1}
-                height={44}
-                alignItems="center"
-                justifyContent="center"
-                borderRadius={22}
-                backgroundColor={palette.cardAlt}
-                transition="quickest"
-                pressStyle={{ opacity: 0.7 }}
-                onPress={() => onOpenChange(false)}>
-                <Text color={palette.textSecondary} fontSize={14.5} fontWeight="600">
-                  取消
-                </Text>
-              </XStack>
-              <XStack
-                flex={1}
-                height={44}
-                alignItems="center"
-                justifyContent="center"
-                gap={8}
-                borderRadius={22}
-                backgroundColor={palette.accent}
-                opacity={name.trim() && !busy ? 1 : 0.5}
-                transition="quickest"
-                pressStyle={{ opacity: 0.85 }}
-                onPress={() => void handleCreate()}>
-                {busy ? <Spinner size="small" color={palette.onAccent} /> : null}
-                <Text color={palette.onAccent} fontSize={14.5} fontWeight="700">
-                  创建
-                </Text>
-              </XStack>
+      animationType="slide"
+      onRequestClose={() => onOpenChange(false)}
+      /*
+       * 兜底聚焦：改成 animationType="slide" 后，挂载瞬间的 autoFocus 有时会在
+       * iOS 的入场动画里被系统吞掉（面板滑上来了但键盘不弹）——
+       * 展示完成这一帧再 focus 一次。已经聚焦时是 no-op，不会把键盘弹两下。
+       */
+      onShow={() => inputRef.current?.focus()}>
+      {/*
+       * 这里比照 TrackActionsSheet 改成**原生 Modal + 显式定高的面板**，不再用 Tamagui Sheet。
+       *
+       * 改之前是 `snapPointsMode="fit"`：fit 必须先渲染内容、再测量高度，
+       * 首帧拿到测量结果前面板会塌成一个很小的高度、随后弹回内容高度 ——
+       * 用户看到的「新建歌单也闪一下」就是这一下。
+       *
+       * 新建歌单还比操作菜单更容易闪：它一打开就 autoFocus 弹键盘，
+       * 而 Sheet 又配了 moveOnKeyboardChange —— 键盘一出现 Sheet 还要重新测量、
+       * 再动画到「被键盘顶起来」的新位置。于是「塌陷 → 撑开 → 顶起」
+       * 叠成连续几次尺寸/位移动画，全发生在打开后的头几帧里。
+       *
+       * 现在：滑动动画交给系统（animationType="slide"），
+       * 面板高度由 CREATE_PANEL_* 常量算死（这个面板内容固定，本来就不需要测量），
+       * 键盘只改变外层容器的可用高度，面板自身尺寸一个像素都不变。
+       */}
+      <Pressable style={styles.overlay} onPress={() => onOpenChange(false)}>
+        {/*
+         * 输入框要和键盘共存：Android 的 Modal 窗口跟着软键盘缩高度（adjustResize），
+         * 面板本来就贴着底部，不用再补一次，补了反而会顶高一截；
+         * iOS 不会缩窗口，所以用 padding 把面板顶到键盘上方。
+         * pointerEvents="box-none"：这层容器自身不接触摸，面板外面的点按仍然落到
+         * 遮罩那个 Pressable 上（= 关闭）。
+         */}
+        <KeyboardAvoidingView
+          style={styles.keyboardArea}
+          pointerEvents="box-none"
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable
+            style={[
+              styles.panel,
+              {
+                height: panelHeight,
+                backgroundColor: palette.card,
+                paddingBottom: bottomPadding,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}>
+            <XStack height={CREATE_PANEL_HANDLE_HEIGHT} alignItems="center" justifyContent="center">
+              <XStack width={40} height={4} borderRadius={2} backgroundColor={palette.cardAlt} />
             </XStack>
-          </YStack>
-        </Sheet.Frame>
-      </Sheet>
+            <YStack
+              paddingTop={CREATE_PANEL_PADDING_TOP}
+              paddingHorizontal={16}
+              paddingBottom={CREATE_PANEL_PADDING_BOTTOM}
+              gap={CREATE_PANEL_GAP}>
+              {/*
+               * 标题也钉死高度：它是文本，行高会随字体缩放变化，
+               * 交给它自己撑开就等于又引入一次「内容决定尺寸」。
+               */}
+              <XStack height={CREATE_PANEL_TITLE_HEIGHT} alignItems="center">
+                <Text color={palette.text} fontSize={17} fontWeight="700">
+                  新建歌单
+                </Text>
+              </XStack>
+              <TextInput
+                ref={inputRef}
+                value={name}
+                onChangeText={setName}
+                placeholder="歌单名称"
+                placeholderTextColor={palette.textTertiary}
+                autoFocus
+                maxLength={40}
+                returnKeyType="done"
+                onSubmitEditing={() => void handleCreate()}
+                style={[
+                  styles.input,
+                  {
+                    color: palette.text,
+                    backgroundColor: palette.cardAlt,
+                    borderColor: palette.border,
+                  },
+                ]}
+              />
+              <XStack gap={12}>
+                <XStack
+                  flex={1}
+                  height={CREATE_PANEL_BUTTON_HEIGHT}
+                  alignItems="center"
+                  justifyContent="center"
+                  borderRadius={22}
+                  backgroundColor={palette.cardAlt}
+                  transition="quickest"
+                  pressStyle={{ opacity: 0.7 }}
+                  onPress={() => onOpenChange(false)}>
+                  <Text color={palette.textSecondary} fontSize={14.5} fontWeight="600">
+                    取消
+                  </Text>
+                </XStack>
+                <XStack
+                  flex={1}
+                  height={CREATE_PANEL_BUTTON_HEIGHT}
+                  alignItems="center"
+                  justifyContent="center"
+                  gap={8}
+                  borderRadius={22}
+                  backgroundColor={palette.accent}
+                  opacity={name.trim() && !busy ? 1 : 0.5}
+                  transition="quickest"
+                  pressStyle={{ opacity: 0.85 }}
+                  onPress={() => void handleCreate()}>
+                  {busy ? <Spinner size="small" color={palette.onAccent} /> : null}
+                  <Text color={palette.onAccent} fontSize={14.5} fontWeight="700">
+                    创建
+                  </Text>
+                </XStack>
+              </XStack>
+            </YStack>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
     </Modal>
   );
 }
 
-type TrackRemovalContext = {
-  /** 所在歌单的 listid(写操作用)。 */
-  listid: string;
-  /** 移除成功后由页面同步本地列表。 */
-  onRemoved: (track: PlayerTrack) => void;
-};
-
 /**
- * 歌曲操作面板:喜欢 / 收藏到歌单 / 分享,在自己歌单上下文里额外提供"从歌单移除"。
+ * 歌曲操作面板:喜欢 / 收藏到歌单 / 分享 / 下载。
  * 原生 Modal 承载 Sheet，避免被 TabBar / MiniPlayer 这类页面浮层盖住。
+ *
+ * 歌单内的「移除」只保留多选后的批量移除（见 playlist/[id].tsx 的 BatchDownloadBar）：
+ * 单曲级的「从歌单移除」和它是同一件事，且批量一次能删多首，重复入口已去掉。
  */
 export function TrackActionsSheet({
   open,
   onOpenChange,
   track,
-  removal,
   initialView = 'actions',
 }: SheetBaseProps & {
   track: PlayerTrack | null;
-  removal?: TrackRemovalContext;
   initialView?: 'actions' | 'pick' | 'download';
 }) {
   const palette = usePalette();
@@ -321,15 +399,6 @@ export function TrackActionsSheet({
     void run(`add-${playlist.listid}`, async () => {
       await libraryActions.addToPlaylist(playlist, [current]);
       showToast(`已收藏到「${playlist.name}」`);
-      onOpenChange(false);
-    });
-  }
-
-  function handleRemove(current: PlayerTrack, context: TrackRemovalContext) {
-    void run('remove', async () => {
-      await libraryActions.removeFromPlaylist(context.listid, [current]);
-      context.onRemoved(current);
-      showToast('已从歌单移除');
       onOpenChange(false);
     });
   }
@@ -489,15 +558,6 @@ export function TrackActionsSheet({
                       onPress={() => handleOpenDownload(track)}
                     />
                   ) : null}
-                  {removal ? (
-                    <ActionRow
-                      icon={<Ionicons name="remove-circle-outline" size={21} color={palette.danger} />}
-                      label="从歌单移除"
-                      danger
-                      busy={busyKey === 'remove'}
-                      onPress={() => handleRemove(track, removal)}
-                    />
-                  ) : null}
                 </YStack>
               ) : view === 'download' ? (
                 <YStack paddingTop={6} height={SHEET_CONTENT_HEIGHT}>
@@ -646,7 +706,9 @@ export function TrackActionsSheet({
 
 const styles = StyleSheet.create({
   input: {
-    height: 46,
+    // 高度取自面板常量：它被算进 CREATE_PANEL_CONTENT_HEIGHT，
+    // 这里再写死一个数字就会出现「常量说 46、输入框实际 48」这种错位。
+    height: CREATE_PANEL_INPUT_HEIGHT,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 14,
@@ -662,6 +724,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(8, 8, 14, 0.42)',
+  },
+  /**
+   * 新建歌单面板的键盘避让容器：撑满遮罩、把面板压在底部（justifyContent 不能省 ——
+   * 键盘避让只在 flex:1 的容器上生效，而容器一旦是 flex:1，子项默认就顶到最上面）。
+   */
+  keyboardArea: {
+    flex: 1,
+    justifyContent: 'flex-end',
   },
   /** 底部面板本体：高度由调用处显式给定，不做任何内容测量。 */
   panel: {

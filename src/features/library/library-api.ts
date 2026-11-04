@@ -66,6 +66,58 @@ export async function createPlaylist(name: string): Promise<string> {
 }
 
 /**
+ * 删除歌单（api/module/playlist_del.js → `/v2/delete_list`，cloudlist 服务）。
+ *
+ * 接口只认 `listid`（用户歌单 ID），不是路由用的 gid ——
+ * 两者在 user_playlist 的返回里是两个不同字段，传错会删不掉对应的歌单。
+ * 模块内部把 listid 转成 Number，所以传数字串即可。
+ *
+ * 服务端对「收藏来的歌单」只会取消收藏、对「我喜欢」这类收藏歌单会拒绝，
+ * 所以调用方要先过 isPlaylistDeletable / isPlaylistUncollectable ——
+ * 这里只负责转发并如实报错。
+ */
+export async function deletePlaylist(listid: string): Promise<void> {
+  await bootstrapMobileApi();
+  const response = await mobileApi.playlist_del({ listid });
+  ensureOk(response.body, '删除歌单失败');
+}
+
+/**
+ * 「我喜欢」的别名：它本质是收藏、不是普通歌单，删掉等于清空全部收藏，
+ * 所以即使 list_create_userid 是本人也禁止删除。
+ *
+ * 名字集合只是 isLike 之外的双保险（isLike 只认「我喜欢」），
+ * 兜住服务端对收藏歌单使用同义叫法的历史差异。
+ *
+ * 注意：**不要把「默认收藏」「我的收藏」加进来** —— 用户确认过它们是
+ * 「我创建的歌单」里的普通歌单（默认收藏只是没起名字），必须允许删除；
+ * 加进来会让用户永远删不掉自己的歌单。
+ */
+const LIKE_PLAYLIST_ALIASES = new Set([LIKE_PLAYLIST_NAME, '我喜欢的音乐']);
+
+/**
+ * 这个歌单能不能整个删掉。
+ * - 只有自己创建的歌单才能真删；收藏来的歌单走 isPlaylistUncollectable（取消收藏）；
+ * - 「我喜欢」以及同义叫法必须排除：删它等于清空收藏。
+ *
+ * 「默认收藏」是普通自建歌单（用户确认过），这里刻意不做名字特判。
+ */
+export function isPlaylistDeletable(playlist: LibraryPlaylist): boolean {
+  return playlist.isMine && !playlist.isLike && !LIKE_PLAYLIST_ALIASES.has(playlist.name);
+}
+
+/**
+ * 这个收藏来的歌单能不能从「我的收藏」里移除。
+ *
+ * 收藏页里的歌单都不是本人创建的，`playlist_del` 在服务端对它们只会取消收藏，
+ * 不会删除原歌单（api/module/playlist_del.js 的注释就是「取消收藏歌单」）。
+ * 所以入口对它们可用，但文案/确认必须说清是「取消收藏」而不是删除。
+ */
+export function isPlaylistUncollectable(playlist: LibraryPlaylist): boolean {
+  return !playlist.isMine && !playlist.isLike && !LIKE_PLAYLIST_ALIASES.has(playlist.name);
+}
+
+/**
  * 收藏歌曲到歌单。data 串按 `,`/`|` 拆分，
  * 所以歌名里的这两个分隔符必须剔除；直调模块不要再 URL 编码。
  */
@@ -82,7 +134,14 @@ export async function addTracksToPlaylist(listid: string, tracks: PlayerTrack[])
   ensureOk(response.body, '收藏失败');
 }
 
-/** 从歌单移除歌曲；fileid 来自歌单曲目接口，与 hash 不是一回事。 */
+/**
+ * 从歌单移除歌曲；fileid 来自歌单曲目接口，与 hash 不是一回事。
+ *
+ * 「我喜欢」的取消喜欢也走这里：酷狗没有单独的取消喜欢接口，
+ * 「我喜欢」本身就是账号下的一个云端歌单（api/module/playlist_tracks_sort.js
+ * 也注明「type 0=自建/我喜欢」）。现有的 toggleLike 取消分支同样是用
+ * removeTracksFromPlaylist(like.listid, [fileid]) 实现的，所以两处行为一致。
+ */
 export async function removeTracksFromPlaylist(listid: string, fileids: string[]): Promise<void> {
   await bootstrapMobileApi();
   const response = await mobileApi.playlist_tracks_del({ listid, fileids: fileids.join(',') });

@@ -1,6 +1,8 @@
 import { pickNumber, pickText, toRecord, toRecords } from '@/lib/api-parse';
 import { bootstrapMobileApi, getApiSession, mobileApi } from '@/lib/kugou-api';
 
+import { vipDayKey } from './vip-day';
+
 /**
  * VIP 相关能力。
  *
@@ -40,6 +42,23 @@ export type VipStatus = {
    * 胶囊会灰掉，他当天那次升级机会就被错误地锁死了。
    */
   conceptValid: boolean;
+  /**
+   * **畅听**（服务端记录里的 `tvip`）那一档的最新到期时间；0 = 没有这一档的有效记录。
+   *
+   * 为什么必须与 `endTimeMs` 分开存：`endTimeMs` 是「两档里**最晚**的那个」，只回答
+   * 「还能听多久」；而想知道「畅听这一档自己还剩多久」时，只有它自己的时间线能回答。
+   * **调度也只认这一份**（见下面 `svipExpiresAt` 的说明）。
+   */
+  vipExpiresAt: number;
+  /**
+   * **概念版**（`svip`）那一档的最新到期时间；0 = 没有这一档的有效记录。
+   *
+   * **只用于显示 / 核对诊断，不参与任何调度决策**：真机实测两档的到期时间只差
+   * 「领取 → 升级」那 1–5 秒，所以调度看 `vipExpiresAt`（或两档取大的 `endTimeMs`）与看它
+   * 效果等价。尤其不能用它判断「今天还能不能领 / 能不能升级」—— 前者看按天记录，
+   * 后者看「今天领过畅听 VIP」（`claimDay`），与 SVIP 有没有到期无关。
+   */
+  svipExpiresAt: number;
 };
 
 const EMPTY_VIP_STATUS: VipStatus = {
@@ -47,6 +66,8 @@ const EMPTY_VIP_STATUS: VipStatus = {
   vipLabel: '',
   endTimeMs: 0,
   conceptValid: false,
+  vipExpiresAt: 0,
+  svipExpiresAt: 0,
 };
 
 /**
@@ -93,6 +114,18 @@ function isConceptRecord(record: Record<string, unknown>): boolean {
 }
 
 /**
+ * 一组记录里最晚的到期时间；没有记录（或都解析不出时间）时返回 0。
+ *
+ * 只在**同一档内部**使用（见 `parseVipStatus`）：两档之间取大是展示口径，不是调度口径。
+ */
+function latestExpiry(records: Record<string, unknown>[]): number {
+  return records.reduce(
+    (latest, item) => Math.max(latest, parseVipEndTime(item.vip_end_time)),
+    0
+  );
+}
+
+/**
  * 从 `/user/vip/detail` 的返回体解析 VIP 状态。
  *
  * ## 为什么 `endTimeMs` 取「所有有效记录里最晚的那个」
@@ -117,6 +150,21 @@ function isConceptRecord(record: Record<string, unknown>): boolean {
  * 它只是昵称旁边那个展示徽标（`SVIP` / `VIP`），错一次不产生任何行为后果；但既然
  * `conceptValid` 已经为了状态判断把**全部**记录扫过一遍，徽标就顺手复用同一个结论 ——
  * 口径统一，也就不会因为数组顺序翻转而在有 SVIP 时显示成 VIP。
+ *
+ * ## 为什么还要把两档的到期时间分别带出去
+ *
+ * 两档是**两条独立的时间线**（真机实测 svip 09:39:04 / tvip 08:52:18，各自从被发放那一刻
+ * 起 24 小时），只是差值恰好等于「领取 → 升级」那 1–5 秒。所以：
+ * - **调度只认畅听那一份** `vipExpiresAt`（与两档取大的 `endTimeMs` 只差这 1–5 秒，
+ *   效果等价）；
+ * - `svipExpiresAt` 保留给**显示 / 核对诊断**：胶囊要回答「概念版还剩多久」，升级之后的
+ *   核对要判断「这次发放有没有让概念版变长」（见 vip-reconcile 的 `isGrantVisible`）。
+ *
+ * 三个问题必须分开问，不能都拿「最晚那个到期时间」回答：
+ * - 「今天还要不要领」→ 自动领取的按天记录（见 vip-silent-claim），与到期时间无关；
+ * - 「今天还能不能升级」→ `claimDay`（今天真的领过畅听 VIP），**不是** SVIP 有没有到期 ——
+ *   昨天的畅听往往还有效，但服务端要的是「**今天**领过了」；
+ * - 「还能听多久 / 概念版还剩多久」→ 展示口径，两档各自取值。
  */
 export function parseVipStatus(body: unknown): VipStatus {
   const records = toRecords(toRecord(toRecord(body).data).busi_vip);
@@ -133,6 +181,16 @@ export function parseVipStatus(body: unknown): VipStatus {
     return EMPTY_VIP_STATUS;
   }
 
+  /*
+   * 两档各自算自己的最新到期时间。
+   *
+   * 真机那两条记录（svip 09:39:04 / tvip 08:52:18）就是两个独立的时间线：升级概念版
+   * 并不会把畅听那条改掉，领取畅听也不会延长概念版。所以这里按 `product_type` 分桶，
+   * 桶内取最晚（同一档可能残留多条历史记录），两桶**绝不合并**。
+   */
+  const vipExpiresAt = latestExpiry(activeRecords.filter((item) => !isConceptRecord(item)));
+  const svipExpiresAt = latestExpiry(activeRecords.filter(isConceptRecord));
+
   return {
     isVip: true,
     /*
@@ -143,11 +201,11 @@ export function parseVipStatus(body: unknown): VipStatus {
      * 若按 active（= [0]）判断，顺序一翻转就会在有 SVIP 时显示成 VIP。
      */
     vipLabel: conceptValid ? 'SVIP' : 'VIP',
-    endTimeMs: activeRecords.reduce(
-      (latest, item) => Math.max(latest, parseVipEndTime(item.vip_end_time)),
-      0
-    ),
+    // 展示口径不变：仍然是「所有有效记录里最晚的那个」（= 两档取大）
+    endTimeMs: Math.max(vipExpiresAt, svipExpiresAt),
     conceptValid,
+    vipExpiresAt,
+    svipExpiresAt,
   };
 }
 
@@ -174,6 +232,25 @@ export type VipClaimOutcome =
   /** 其他失败。 */
   | 'failed';
 
+/**
+ * 领取接口的完整结果：除了结论，还带上**服务端下发的下次可领取时间戳**。
+ *
+ * ## 为什么要把时间戳一起带出来（而不是让调用方自己算）
+ *
+ * 「下次可领取时间」是整条自动领取链路唯一的事实依据（见 vip-deadline）：
+ * 闹钟、回前台、重启恢复三处都只**读**它，绝不各自拿 `上次领取 + 24h` 现算 ——
+ * 三处现算必然会漂移，而漂移的表现就是要么漏领、要么重复请求。
+ *
+ * 所以「算这一次」只允许发生在领取成功的那一处，并且优先用服务端给的值；
+ * `0` = **服务端没给**（这个接口的返回体没有文档化的该字段，仓库里也没有响应样例），
+ * 调用方按「下一个自然日的校准时刻」兜底 —— 那个兜底同样只在 vip-deadline 里写一次。
+ */
+export type DailyVipClaimResult = {
+  outcome: VipClaimOutcome;
+  /** 服务端下发的下次可领取时间（毫秒）；0 = 服务端没给。 */
+  deadlineMs: number;
+};
+
 /** 提取酷狗返回体里的错误码，兼容 { error_code } 与包在 body 里的两种形态。 */
 function pickErrorCode(error: unknown): number {
   if (!error || typeof error !== 'object') {
@@ -191,11 +268,91 @@ function pickErrorCode(error: unknown): number {
   return pickNumber(record.error_code, record.status);
 }
 
+/**
+ * 返回体里可能承载「下次可领取时间」的字段名（按可能性排序）。
+ *
+ * 为什么是一张**候选表**而不是一个写死的字段：领取接口的返回体在
+ * `api/module/youth_day_vip.js` 里没有做任何字段约定（它只透传响应），仓库里也没有
+ * 响应样例。多认几个名字的代价只是几行代码；认不出来就退回本地校准值，依然可用。
+ *
+ * **刻意不认 `vip_end_time` / `end_time` / `expire_*` / `deadline`**：这些是 VIP 的
+ * **到期时间**（≈ 发放时刻 + 24h），不是「下次可领时间」。把它们当下次可领，会在
+ * 23:52 领到之后把下一次排到第二天 23:52 —— 正好复刻「晚上领过一次、第二天一整天
+ * 不自动领」那个线上故障。只有 `next_*` / `reset_*` 才是同一语义。
+ */
+const NEXT_CLAIM_FIELDS = [
+  'next_time',
+  'next_receive_time',
+  'next_claim_time',
+  'next_claim_at',
+  'next_receive_at',
+  'next_day_time',
+  'reset_time',
+  'reset_at',
+] as const;
+
+/**
+ * 服务端给的「下次可领时间」最多能有多远。
+ *
+ * 每日额度按自然日重置，所以正常的 next_time 不会超过约 24 小时（跨时区再加一点余量）。
+ * 超过 26 小时的值更可能是别的语义（月度重置、到期时间、噪声），宁可不采信、退回
+ * 本地校准 —— 否则一个错误字段就能把领取锁死好几天。
+ */
+const NEXT_CLAIM_MAX_AHEAD_MS = 26 * 60 * 60 * 1000;
+
+/**
+ * 从领取返回体里取出「下次可领取时间戳」；取不到返回 0。
+ *
+ * 两个校验缺一不可：
+ * - `> now`：候选字段里也可能有「多少秒后」（如 86400）。按绝对时间解析出来是 1970 年，
+ *   放过它会把下一次领取排到几十年前，整条链路**永远不再触发**；
+ * - `<= now + 26h`：见 `NEXT_CLAIM_MAX_AHEAD_MS`，挡住语义不对/噪声字段。
+ */
+function extractNextClaimAt(body: unknown): number {
+  const root = toRecord(body);
+  const groups = [
+    root,
+    toRecord(root.data),
+    toRecord(toRecord(root.data).data),
+    toRecord(root.result),
+    toRecord(root.info),
+  ];
+  const now = Date.now();
+
+  for (const record of groups) {
+    for (const field of NEXT_CLAIM_FIELDS) {
+      const value = parseVipEndTime(record[field]);
+      if (value > now && value <= now + NEXT_CLAIM_MAX_AHEAD_MS) {
+        return value;
+      }
+    }
+  }
+
+  return 0;
+}
+
+
+/**
+ * 日志用：列出返回体顶层字段名（只列 key，不打印值）。
+ *
+ * 目的不是调试某一次请求，而是给「服务端到底有没有下发下次可领时间」留下可查证据：
+ * 现在的接口模块 `api/module/youth_day_vip.js` 只透传响应，没有声明任何字段；
+ * 仓库里也没有响应样例。真机日志里看到这行时，就能直接确认这次响应到底给了什么。
+ */
+function describeBodyKeys(body: unknown): string {
+  const keys = Object.keys(toRecord(body));
+  return keys.length ? keys.join(',') : '空';
+}
+
+/**
+ * 发给服务端的 `receive_day`。
+ *
+ * 与本地按天标记共用同一套日历（**东八区 04:00 换日**，见 vip-day）。两边口径一旦不同，
+ * 就会出现「本地以为没领过 → 白发一次请求（服务端回 131001）」或者「本地以为已经领过 →
+ * 当天真的漏领」这两种都很难查的故障。
+ */
 function todayKey(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
+  return vipDayKey();
 }
 
 /**
@@ -205,10 +362,13 @@ function todayKey(): string {
  * - **不弹任何 UI**，结果只进日志（调用方按需决定是否提示）
  * - **不询问是否升级概念版**，领取成功后直接结束
  * - 不做重试：风控 / 今日已领都直接返回，避免加剧风控
+ *
+ * 返回值带上服务端下发的「下次可领取时间戳」（见 `DailyVipClaimResult`）：
+ * 这是整条链路唯一的时间依据，由调用方在**一处**落盘，绝不在这里自己加 24h。
  */
-export async function claimDailyVipSilently(): Promise<VipClaimOutcome> {
+export async function claimDailyVipSilently(): Promise<DailyVipClaimResult> {
   if (!getApiSession().token) {
-    return 'not-logged-in';
+    return { outcome: 'not-logged-in', deadlineMs: 0 };
   }
 
   await bootstrapMobileApi();
@@ -216,21 +376,46 @@ export async function claimDailyVipSilently(): Promise<VipClaimOutcome> {
   try {
     const response = await mobileApi.youth_day_vip({ receive_day: todayKey() });
     const body = toRecord(response.body);
+    const deadlineMs = extractNextClaimAt(body);
+    if (deadlineMs <= 0) {
+      /*
+       * 当前接口没有文档化的「下次可领时间」字段（见 api/module/youth_day_vip.js：
+       * 它只是把响应原样透传）。这里只打顶层 key，既留下证据，也不泄露响应内容。
+       * 排期因此走本地校准值（默认 00:05），而不是凭空相信某个写死的时刻。
+       */
+      console.log(
+        `[vip] 领取返回体没有「下次可领时间」字段（顶层：${describeBodyKeys(
+          body
+        )}），按本地校准值排期`
+      );
+    }
     if (pickNumber(body.status) === 1) {
-      return 'claimed';
+      return { outcome: 'claimed', deadlineMs };
     }
     // status 非 1 且没抛错：按「今天已领」处理，不当作失败
-    return 'already';
+    return { outcome: 'already', deadlineMs };
   } catch (error) {
+    // 失败分支同样试着取一次：131001（今天已领）的返回体里可能带下次可领时间，
+    // 有的话就不必退回到本地校准值
+    const record = toRecord(error);
+    const deadlineMs =
+      extractNextClaimAt(record.body) || extractNextClaimAt(toRecord(record.response).data);
     const code = pickErrorCode(error);
     if (code === 131001) {
-      return 'already';
+      if (deadlineMs <= 0) {
+        console.log(
+          `[vip] 131001 返回体没有「下次可领时间」字段（顶层：${describeBodyKeys(
+            record.body
+          )}），按本地校准值排期`
+        );
+      }
+      return { outcome: 'already', deadlineMs };
     }
     if (code === 20028) {
-      return 'risk';
+      return { outcome: 'risk', deadlineMs };
     }
     console.warn('[vip] 静默领取失败:', code || error);
-    return 'failed';
+    return { outcome: 'failed', deadlineMs };
   }
 }
 

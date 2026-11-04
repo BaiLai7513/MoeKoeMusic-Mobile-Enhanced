@@ -1,15 +1,15 @@
-﻿{
+{
   "expo": {
     "name": "MoeKoe",
     "slug": "moekoe",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moekoe",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.moekoe.music",
-      "versionCode": 12,
+      "versionCode": 13,
       "adaptiveIcon": {
         "backgroundColor": "#F6F9FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -59,7 +59,8 @@
       "expo-asset",
       "./plugins/with-media3",
       "./plugins/with-gradle-props",
-      "./plugins/with-player"
+      "./plugins/with-player",
+      "./plugins/with-vip-alarm"
     ],
     "experiments": {
       "typedRoutes": true,

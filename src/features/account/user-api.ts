@@ -3,7 +3,8 @@ import { sizedImage } from '@/lib/format';
 import { bootstrapMobileApi, getApiSession, mobileApi } from '@/lib/kugou-api';
 
 import { parseVipStatus } from './vip-api';
-import { rememberSvipValid, rememberVipEndTimeMs } from './vip-local-state';
+import { adoptVipEndTimeFromServer } from './vip-deadline';
+import { rememberVipStatusSnapshot } from './vip-local-state';
 
 export type UserProfile = {
   userid: string;
@@ -58,13 +59,21 @@ export async function fetchUserProfile(): Promise<UserProfile> {
    * 自动补领与胶囊按钮从此只读本地，不再为了判断状态单独打一次 /user/vip/detail，
    * 而这里反正已经查到了 —— 让它成为下一次冷启动的判断依据。
    *
+   * 落盘走 `rememberVipStatusSnapshot` 这一个入口：分档到期时间（畅听/概念版各一份）、
+   * 展示用的最晚到期时间、今天有没有概念版，都来自**同一次回答**；顺带清掉「待核对」
+   * 标记 —— 领取/升级后的核对没成功时留下的那条记录，在这里被权威回答纠正。
+   *
    * 只有真的拿到了服务端回答（vipStatus 非 null）才写：请求失败不是「没有 VIP」，
    * 而是「没问到」，那种情况下写入会把一条本来正确的本地记录清掉。
    */
   if (vipStatus) {
-    void rememberVipEndTimeMs(vipStatus.endTimeMs);
-    // SVIP 的「今天这一份」：权威回答才有资格写（见 vip-local-state 的 rememberSvipValid）
-    void rememberSvipValid(vipStatus.conceptValid);
+    void rememberVipStatusSnapshot(vipStatus, 'profile');
+    // 同一份权威时间也要喂给「下次可领取时间戳」：否则本地按「上次领取 +24h」排的闹钟
+    // 会在用户还有很长 VIP 的时候白响一次（服务端只会回 131001）。只延长、不缩短，
+    // 理由见 vip-deadline 的 adoptVipEndTimeFromServer。
+    // 这里刻意只用 `endTimeMs`（两档取大，与畅听那份只差领取→升级的 1–5 秒）：
+    // 排期只需要「最晚到什么时候」，分档的 `svipExpiresAt` 不参与调度。
+    void adoptVipEndTimeFromServer(vipStatus.endTimeMs);
   }
 
   return {

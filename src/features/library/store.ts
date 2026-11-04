@@ -7,8 +7,11 @@ import { readCache, writeCache } from '@/lib/offline-cache';
 import {
   addTracksToPlaylist,
   createPlaylist,
+  deletePlaylist as deletePlaylistRemote,
   fetchLibraryPlaylists,
   fetchPlaylistTrackRefs,
+  isPlaylistDeletable,
+  isPlaylistUncollectable,
   removeTracksFromPlaylist,
   type LibraryPlaylist,
 } from './library-api';
@@ -57,11 +60,13 @@ function getLikePlaylist(): LibraryPlaylist | null {
 }
 
 function bumpCount(listid: string, delta: number) {
-  setState({
-    playlists: state.playlists.map((item) =>
-      item.listid === listid ? { ...item, count: Math.max(0, item.count + delta) } : item
-    ),
-  });
+  const playlists = state.playlists.map((item) =>
+    item.listid === listid ? { ...item, count: Math.max(0, item.count + delta) } : item
+  );
+  setState({ playlists });
+  // 数量变化也要落缓存：否则断网重进「我的」页时，缓存里的旧 count
+  // 会把刚加/刚移除的数量“复活”，和内存里的歌单列表对不上。
+  void writeCache(LIBRARY_CACHE_KEY, playlists);
 }
 
 let refreshPromise: Promise<void> | null = null;
@@ -147,6 +152,40 @@ async function ensureLikedReady(): Promise<void> {
   }
 }
 
+/**
+ * 真正执行「从云端歌单删歌」的公共逻辑。
+ *
+ * 普通自建歌单与「我喜欢」共用同一个云端接口（见 library-api 的注释），
+ * 差别只在状态同步：如果删的正是「我喜欢」，还要把 liked 映射一起清掉，
+ * 否则列表里那颗红心会继续亮着，用户会以为没取消成功。
+ *
+ * 只处理带 fileid 的曲目：fileid 是「这首歌在这个歌单里的实例 ID」，
+ * 接口只认它，不能拿 hash 顶替。
+ */
+async function removeTracksFromList(listid: string, tracks: PlayerTrack[]): Promise<void> {
+  const removable = tracks.filter(
+    (track): track is PlayerTrack & { fileid: string } => Boolean(track.fileid)
+  );
+  if (!removable.length) {
+    throw new Error('缺少歌曲信息，无法移除');
+  }
+
+  await removeTracksFromPlaylist(
+    listid,
+    removable.map((track) => track.fileid)
+  );
+  bumpCount(listid, -removable.length);
+
+  const like = getLikePlaylist();
+  if (like?.listid === listid) {
+    const liked = { ...state.liked };
+    for (const track of removable) {
+      delete liked[track.hash];
+    }
+    setState({ liked });
+  }
+}
+
 export const libraryActions = {
   refresh: refreshLibrary,
   ensure: ensureLibrary,
@@ -217,24 +256,28 @@ export const libraryActions = {
 
   /** 从歌单移除歌曲(需要 track.fileid)。 */
   async removeFromPlaylist(listid: string, tracks: PlayerTrack[]): Promise<void> {
-    const fileids = tracks
-      .map((track) => track.fileid)
-      .filter((fileid): fileid is string => Boolean(fileid));
-    if (!fileids.length) {
-      throw new Error('缺少歌曲信息，无法移除');
-    }
+    await removeTracksFromList(listid, tracks);
+  },
 
-    await removeTracksFromPlaylist(listid, fileids);
-    bumpCount(listid, -fileids.length);
+  /**
+   * 批量取消喜欢（「我喜欢」页的批量移除）。
+   *
+   * 语义上这是「取消收藏」，不是把歌从自建歌单里删掉；但底层没有独立的取消喜欢接口，
+   * 「我喜欢」本身就是账号下的一个云端歌单，所以仍然调用同一个删歌接口，
+   * 只是 listid 固定取「我喜欢」歌单，并同步 liked 映射（见 removeTracksFromList）。
+   * 这与现有的单曲 toggleLike 取消分支完全一致，不会出现两套状态。
+   */
+  async removeLikedTracks(tracks: PlayerTrack[]): Promise<void> {
+    if (!isLoggedIn()) {
+      throw new Error('请先登录');
+    }
 
     const like = getLikePlaylist();
-    if (like?.listid === listid) {
-      const liked = { ...state.liked };
-      for (const track of tracks) {
-        delete liked[track.hash];
-      }
-      setState({ liked });
+    if (!like) {
+      throw new Error('没有找到"我喜欢"歌单');
     }
+
+    await removeTracksFromList(like.listid, tracks);
   },
 
   /** 创建歌单并刷新列表，返回新歌单 listid。 */
@@ -246,6 +289,34 @@ export const libraryActions = {
     const listid = await createPlaylist(name);
     await refreshLibrary();
     return listid;
+  },
+
+  /**
+   * 删除自己创建的歌单，或取消收藏别人/官方的歌单。
+   *
+   * 为什么要先本地挡一次：删除接口对「默认收藏」这类普通自建歌单是真删，
+   * 对收藏来的歌单只做取消收藏，对「我喜欢」这类收藏歌单会拒绝/造成灾难。
+   * 入口已经按 isPlaylistDeletable / isPlaylistUncollectable 过滤；
+   * 这里再挡一道，避免别处调用时误删。
+   *
+   * 成功后**不重新拉列表**：直接把这条从内存 state 里摘掉并同步离线缓存。
+   * 「我的」页读的就是这份 state，所以列表立刻消失；再打一次网络请求只会
+   * 让「删完还看得见」的窗口更长，断网时甚至会把刚删掉的歌单从缓存里复活。
+   */
+  async removePlaylist(playlist: LibraryPlaylist): Promise<void> {
+    if (!isLoggedIn()) {
+      throw new Error('请先登录');
+    }
+    if (!isPlaylistDeletable(playlist) && !isPlaylistUncollectable(playlist)) {
+      throw new Error('这个歌单不能删除');
+    }
+
+    await deletePlaylistRemote(playlist.listid);
+
+    const playlists = state.playlists.filter((item) => item.listid !== playlist.listid);
+    setState({ playlists });
+    // 缓存与内存同源，否则断网重进「我的」页又会被旧缓存拉回来
+    void writeCache(LIBRARY_CACHE_KEY, playlists);
   },
 };
 

@@ -12,8 +12,8 @@ import { ACCENT_PRESETS, getPalette, type AccentPreset } from '@/constants/accen
 import { MaxContentWidth, type SchemeName } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
 import { libraryActions } from '@/features/library/store';
+import { LogSettingsSection } from '@/features/logs/log-section';
 import { AUDIO_QUALITIES, AUDIO_QUALITY_LABELS } from '@/features/player/audio-quality';
-import { ListenSyncSettingSection } from '@/features/player/listen-sync-setting';
 import {
   settingsActions,
   useAudioQuality,
@@ -320,8 +320,8 @@ export default function SettingsScreen() {
             </Text>
           </YStack>
 
-          {/* 听歌时长同步（默认关闭）。接口未就绪时整块自行返回 null，不留空标题。 */}
-          <ListenSyncSettingSection />
+          {/* 运行日志：占用 / 导出 / 查看今日 / 清空。原先这里是「听歌时长」区块。 */}
+          <LogSettingsSection />
 
           <YStack gap={10}>
             <SectionHeader title="通用" />

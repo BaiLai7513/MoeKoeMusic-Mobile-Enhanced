@@ -8,6 +8,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { Artwork } from '@/components/ui/artwork';
+import {
+  PlaylistRemoveSheet,
+  type PlaylistRemoveMode,
+} from '@/components/ui/playlist-remove-sheet';
 import { showToast } from '@/components/ui/toast';
 import { CreatePlaylistSheet } from '@/components/ui/track-actions-sheet';
 import {
@@ -15,6 +19,10 @@ import {
   isLoggedIn,
   type UserProfile,
 } from '@/features/account/user-api';
+import {
+  isPlaylistDeletable,
+  isPlaylistUncollectable,
+} from '@/features/library/library-api';
 import { libraryActions, useLibrary, type LibraryPlaylist } from '@/features/library/store';
 import {
   claimSvip,
@@ -291,7 +299,50 @@ function VipChipRow() {
   );
 }
 
-/** 可点击展开/收起的歌单分组标题。 */
+/**
+ * 区块标题右侧的文字动作。
+ *
+ * 视觉高度通常 26，不把标题行撑高（原来「新建」就是 26 左右的文字）；
+ * 但用 hitSlop 把上下各扩 9 → 实际触控区 44，满足最小触控目标。
+ * 横向只扩 4：两个动作相邻时热区不能互相盖住，否则点「删除」可能触发「新建」。
+ */
+function HeaderAction({
+  label,
+  danger = false,
+  onPress,
+}: {
+  label: string;
+  danger?: boolean;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+
+  return (
+    <XStack
+      minHeight={26}
+      paddingHorizontal={6}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={10}
+      hitSlop={{ top: 9, bottom: 9, left: 4, right: 4 }}
+      transition="quickest"
+      pressStyle={{ opacity: 0.6 }}
+      onPress={(event) => {
+        // 标题行整行可点（展开/收起），动作按钮必须阻止冒泡，否则点「删除」会顺手折叠区块
+        event.stopPropagation();
+        onPress();
+      }}>
+      <Text
+        color={danger ? palette.danger : palette.accent}
+        fontSize={13.5}
+        fontWeight="600">
+        {label}
+      </Text>
+    </XStack>
+  );
+}
+
+/** 可点击展开/收起的歌单分组标题；动作区最多两个文字按钮（如「删除」+「新建」）。 */
 function CollapsibleSectionHeader({
   title,
   count,
@@ -299,6 +350,9 @@ function CollapsibleSectionHeader({
   onToggle,
   actionLabel,
   onAction,
+  actionDanger = false,
+  secondaryActionLabel,
+  onSecondaryAction,
 }: {
   title: string;
   count: number;
@@ -306,6 +360,10 @@ function CollapsibleSectionHeader({
   onToggle: () => void;
   actionLabel?: string;
   onAction?: () => void;
+  /** 主操作是否用危险色（「收藏的歌单」里删除 = 取消收藏）。 */
+  actionDanger?: boolean;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
 }) {
   const palette = usePalette();
 
@@ -322,18 +380,19 @@ function CollapsibleSectionHeader({
       <Text flex={1} color={palette.textTertiary} fontSize={12.5}>
         {count > 0 ? `${count} 个` : ''}
       </Text>
+      {secondaryActionLabel && onSecondaryAction ? (
+        <HeaderAction
+          label={secondaryActionLabel}
+          danger
+          onPress={onSecondaryAction}
+        />
+      ) : null}
       {actionLabel && onAction ? (
-        <Text
-          color={palette.accent}
-          fontSize={13.5}
-          fontWeight="600"
-          paddingVertical={4}
-          paddingHorizontal={4}
-          pressStyle={{ opacity: 0.6 }}
+        <HeaderAction
+          label={actionLabel}
+          danger={actionDanger}
           onPress={onAction}
-          suppressHighlighting>
-          {actionLabel}
-        </Text>
+        />
       ) : null}
       <XStack
         width={24}
@@ -366,6 +425,9 @@ export default function MeScreen() {
     error: '',
   });
   const [createOpen, setCreateOpen] = useState(false);
+  // 「删除整个歌单」面板：一个入口管两个区块，用 mode 区分文案与语义
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageMode, setManageMode] = useState<PlaylistRemoveMode>('delete');
   // 创建的歌单默认展开，收藏的歌单默认收起
   const [createdOpen, setCreatedOpen] = useState(true);
   const [collectedOpen, setCollectedOpen] = useState(false);
@@ -490,12 +552,40 @@ export default function MeScreen() {
   const likePlaylist = library.playlists.find((item) => item.isLike) ?? null;
   const createdPlaylists = library.playlists.filter((item) => item.isMine && !item.isLike);
   const collectedPlaylists = library.playlists.filter((item) => !item.isMine);
+  /*
+   * 两个区块的「删除」范围不一样：
+   * - 自建：真删，过 isPlaylistDeletable（含「默认收藏」，排除「我喜欢」）；
+   * - 收藏：接口只会取消收藏，过 isPlaylistUncollectable。
+   * 先过滤再决定入口是否显示：一个都不能删时不摆一个点进去空面板的按钮。
+   */
+  const deletableCreated = createdPlaylists.filter(isPlaylistDeletable);
+  const uncollectableCollected = collectedPlaylists.filter(isPlaylistUncollectable);
 
   function openPlaylist(item: LibraryPlaylist) {
     router.push({
       pathname: '/playlist/[id]',
       params: { id: item.gid, name: item.name, cover: item.coverUrl ?? '' },
     });
+  }
+
+  function openPlaylistManager(mode: PlaylistRemoveMode) {
+    setManageMode(mode);
+    setManageOpen(true);
+  }
+
+  /**
+   * 面板里确认后的真正动作。
+   *
+   * removePlaylist 内部会区分「自建 = 真删」和「收藏 = 取消收藏」，
+   * 并在成功后同步 library state 与 LIBRARY_CACHE_KEY；这里只负责提示。
+   */
+  async function handleRemovePlaylist(playlist: LibraryPlaylist) {
+    await libraryActions.removePlaylist(playlist);
+    // 用歌单本身的归属决定文案，而不是依赖面板的 mode：
+    // 自建 = 真删，收藏来的 = 取消收藏，避免两个状态短暂不同步时说错话
+    showToast(
+      playlist.isMine ? `已删除「${playlist.name}」` : `已取消收藏「${playlist.name}」`
+    );
   }
 
   const profile = state.loggedIn && state.profile ? state.profile : null;
@@ -691,6 +781,10 @@ export default function MeScreen() {
                   onToggle={() => setCreatedOpen((open) => !open)}
                   actionLabel="新建"
                   onAction={() => setCreateOpen(true)}
+                  secondaryActionLabel={deletableCreated.length ? '删除' : undefined}
+                  onSecondaryAction={
+                    deletableCreated.length ? () => openPlaylistManager('delete') : undefined
+                  }
                 />
                 {createdOpen ? (
                   createdPlaylists.length ? (
@@ -728,6 +822,13 @@ export default function MeScreen() {
                     count={collectedPlaylists.length}
                     open={collectedOpen}
                     onToggle={() => setCollectedOpen((open) => !open)}
+                    actionLabel={uncollectableCollected.length ? '删除' : undefined}
+                    actionDanger
+                    onAction={
+                      uncollectableCollected.length
+                        ? () => openPlaylistManager('uncollect')
+                        : undefined
+                    }
                   />
                   {collectedOpen ? (
                     <YStack
@@ -846,6 +947,18 @@ export default function MeScreen() {
       </XStack>
 
       <CreatePlaylistSheet open={createOpen} onOpenChange={setCreateOpen} />
+      {/*
+       * 两个区块共用一个面板，靠 mode 区分「删除歌单」与「取消收藏」。
+       * playlists 传的是当前模式对应的可操作集合；删除成功后由父组件关闭面板，
+       * 不会留下一个指向已消失歌单的确认态。
+       */}
+      <PlaylistRemoveSheet
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        playlists={manageMode === 'delete' ? deletableCreated : uncollectableCollected}
+        mode={manageMode}
+        onConfirm={handleRemovePlaylist}
+      />
     </View>
   );
 }

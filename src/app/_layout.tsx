@@ -7,26 +7,25 @@ import { useEffect, useMemo } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { hydrateSettings, useSettingsHydrated } from '@/features/settings/store';
+import { installLogCapture } from '@/features/logs/capture';
 import { syncFromStorage } from '@/features/account/vip-claim-state';
-import { attachVipClaimToPlayback } from '@/features/account/vip-play-claim';
-import { attachListenReport } from '@/features/player/listen-report';
+import { attachVipClaimTriggers } from '@/features/account/vip-play-claim';
 import { ToastHost } from '@/components/ui/toast';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { tamaguiConfig } from '../../tamagui.config';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 void hydrateSettings();
+// 运行日志的捕获必须在这层就装上：登录态、播放器内核都在模块初始化阶段打日志，
+// 放进组件 effect 会整段漏掉。安装后它会接管 console 与未捕获异常，见 features/logs。
+installLogCapture();
 // 在模块作用域就把「今天领没领过 VIP」读回来，而不是等「我的」页面挂载再读：
 // 前者能保证按钮首帧就是正确状态，后者会先闪一下再跳成正确文案。
 void syncFromStorage();
-// 自动补领的触发点已经从「启动」移到「开始播放歌曲」：
-// 启动即打领取接口的节奏太像脚本（实测会被判风控），而且用户开 App 不等于要听歌。
-// 这里只做接线，具体节流与接口边界见 vip-play-claim / vip-silent-claim。
-attachVipClaimToPlayback();
-// 听歌时长同步：同样是接线，不是组件。开关默认关闭，关闭时连原生状态监听都不会挂
-// （所以「关闭 → 一次请求都不发」是结构性的，不靠分支判断）。频率与防风险约定见
-// listen-report 的文件头。
-attachListenReport();
+// 自动补领的触发点：开播、被 VIP 挡住、打开 App / 回前台、闹钟到期（AlarmManager）。
+// 「该不该领」只看 vip-deadline 里那一个截止时间戳；这里只做接线，节流与接口边界见
+// vip-play-claim / vip-silent-claim / vip-deadline 的文件头。
+attachVipClaimTriggers();
 
 export default function RootLayout() {
   const hydrated = useSettingsHydrated();
@@ -126,6 +125,12 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="web"
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="logs"
             options={{
               animation: 'slide_from_right',
             }}

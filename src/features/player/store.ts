@@ -730,17 +730,6 @@ export function isCurrentQueueGeneration(expected: number): boolean {
   return expected === queueGeneration;
 }
 
-/**
- * 同步读当前曲目（给**非 React** 的订阅方用，目前是 listen-report）。
- *
- * 为什么需要它：听歌时长上报要拿 `track.albumAudioId`（酷狗 MixSongID），
- * 而原生状态事件里只有曲目 hash（`mediaId`）。上报引擎不是组件，不能调 `usePlayer`
- * 这个 hook，所以在这里开一个只读出口 —— 不新增状态、不触发重渲染。
- */
-export function getCurrentPlayerTrack(): PlayerTrack | null {
-  return playerStore.getState().track;
-}
-
 export const playerActions = {
   async loadLyrics() {
     const { track, lyricsStatus } = playerStore.getState();

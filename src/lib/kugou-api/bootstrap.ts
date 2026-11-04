@@ -25,11 +25,6 @@ function installRuntimeGlobals(): void {
   processRef.env ??= Object.create(null) as Record<string, string | undefined>;
   /*
    * 锁定为 lite（概念版 v2 协议）—— **不要改，也不要按设备/账号去切换**。
-   *
-   * 上游的听歌时长上报（`user_grade_info` / `user_listen_report`）只在 lite 平台下走
-   * `userinfo.user.kugou.com/v2/get_grade_info` 记账；标准版 v4 协议只能查询、不接收增量。
-   * 这一行同时也是「同一个账号在本客户端的成长值口径与概念版客户端一致」的前提：
-   * 改成别的值，上报会静默变成「查得到、不记账」。
    */
   processRef.env.platform = 'lite';
 }

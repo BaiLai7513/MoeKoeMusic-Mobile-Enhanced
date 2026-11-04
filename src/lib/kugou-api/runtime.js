@@ -4,6 +4,34 @@
 // 不能写成 require('axios')，否则 Metro 在项目根解析不到会直接打包失败。
 // 按路径 require 拿到的是同一个模块实例，所以设置 defaults 对 request.js 同样生效。
 const axios = require('../../../api/node_modules/axios');
+const { noteServerDateHeader } = require('./server-time');
+
+/**
+ * 服务端时钟校准：把每个响应的 `Date` 头换成「设备时钟偏移」。
+ *
+ * 为什么必须挂在**这个** axios 实例上：`api/util/request.js` 里 `require('axios')`
+ * 解析到的是同一个模块实例（见上方注释），所以这里的拦截器对**所有**酷狗请求生效，
+ * 而且不需要改 api/ 子模块。领取接口的响应同样带 Date —— 也就是说「刚领到的那一刻」
+ * 服务端认为现在几点，我们顺手就拿到了，不需要额外发一次校时请求。
+ *
+ * 拦截器只做一件事且绝不抛错：校准失败最多让判定退回设备时间，
+ * 而绝不能让一次正常请求因为「时间解析不了」而失败。
+ */
+axios.interceptors.response.use(function (response) {
+  try {
+    const headers = response && response.headers;
+    if (headers) {
+      const value =
+        typeof headers.get === 'function' ? headers.get('date') : headers.date || headers.Date;
+      if (typeof value === 'string') {
+        noteServerDateHeader(value);
+      }
+    }
+  } catch {
+    // 刻意吞掉：时钟校准是锦上添花
+  }
+  return response;
+});
 
 /**
  * 给 axios 设一个**全局默认超时**。

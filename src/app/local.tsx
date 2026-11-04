@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { startTransition, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, View as RNView } from 'react-native';
+import { startTransition, useEffect, useMemo, useState } from 'react';
+import { FlatList, Keyboard, StyleSheet, TextInput, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { MiniPlayer, MINI_PLAYER_HEIGHT } from '@/components/ui/mini-player';
 import { SongListItem } from '@/components/ui/song-list-item';
+import { TouchText } from '@/components/ui/touch-text';
 import { withAlpha } from '@/constants/accents';
 import { MaxContentWidth } from '@/constants/theme';
 import { scanLocalMusic } from '@/features/local/local-music';
@@ -37,6 +38,10 @@ export default function LocalMusicScreen() {
     loading: true,
     permissionDenied: false,
   });
+  // 本地筛选搜索：默认收起（不占列表高度），点右上角放大镜才展开。
+  // 与歌单页同一套交互，避免两处「搜索」长得不一样。
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -62,8 +67,64 @@ export default function LocalMusicScreen() {
   const activeHash = track?.hash;
   const listBottomInset = insets.bottom + (hasTrack ? MINI_PLAYER_HEIGHT + 26 : 16) + 16;
 
+  const trimmedKeyword = keyword.trim();
+  const loweredKeyword = trimmedKeyword.toLowerCase();
+  const filtering = loweredKeyword.length > 0;
+
+  /*
+   * 只过滤「显示」用的行，并顺手记住每首歌在扫描结果里的原始下标。
+   * 序号和播放起点都必须按原始列表算 —— 过滤后的位置只用于渲染。
+   *
+   * 本地音乐是一次性扫描（不像歌单要分页），所以这里**没有**「筛选时自动补页」那套逻辑：
+   * 扫描结果就是全部曲目，筛选不会漏歌。
+   */
+  const rows = useMemo(() => {
+    const all = state.tracks.map((track, index) => ({ track, index }));
+    if (!loweredKeyword) {
+      return all;
+    }
+    return all.filter(({ track }) => {
+      return (
+        track.title.toLowerCase().includes(loweredKeyword) ||
+        track.artist.toLowerCase().includes(loweredKeyword) ||
+        (track.album ? track.album.toLowerCase().includes(loweredKeyword) : false)
+      );
+    });
+  }, [state.tracks, loweredKeyword]);
+
+  // 本地曲目数在扫描完成后就是确定的，所以「共 N 首」始终可显示，
+  // 只有处于筛选状态时才追加「匹配 M 首」。
+  const countText = filtering
+    ? `共 ${state.tracks.length} 首 · 匹配 ${rows.length} 首`
+    : `共 ${state.tracks.length} 首`;
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setKeyword('');
+    Keyboard.dismiss();
+  }
+
+  function toggleSearch() {
+    if (searchOpen) {
+      closeSearch();
+    } else {
+      setSearchOpen(true);
+    }
+  }
+
+  function clearKeyword() {
+    setKeyword('');
+  }
+
+  /** 空结果里的「清除筛选」：顺手收起键盘，好让用户马上看到完整列表。 */
+  function clearFilter() {
+    setKeyword('');
+    Keyboard.dismiss();
+  }
+
   function playFrom(index: number) {
-    // 本地曲目解析是同步级的（不请求网络），整列表丢给播放器即可
+    // 本地曲目解析是同步级的（不请求网络），整列表丢给播放器即可。
+    // index 始终是**扫描结果里的原始下标**：筛选只换显示行，不改变播放队列。
     void playCollection({
       tracks: state.tracks,
       startIndex: index,
@@ -88,9 +149,12 @@ export default function LocalMusicScreen() {
       />
 
       <FlatList
-        data={state.tracks}
-        keyExtractor={(item) => item.hash}
+        data={rows}
+        keyExtractor={(item) => `${item.track.hash}-${item.index}`}
         showsVerticalScrollIndicator={false}
+        // 搜索时点歌不该先被键盘「吃掉」一次触摸；滑列表则顺手收起键盘
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={{
           alignSelf: 'center',
           width: '100%',
@@ -101,20 +165,97 @@ export default function LocalMusicScreen() {
         }}
         ListHeaderComponent={
           <YStack gap={18} paddingHorizontal={4} paddingBottom={16}>
-            <XStack
-              width={38}
-              height={38}
-              borderRadius={19}
-              alignItems="center"
-              justifyContent="center"
-              backgroundColor={palette.card}
-              borderWidth={StyleSheet.hairlineWidth}
-              borderColor={palette.border}
-              transition="quickest"
-              pressStyle={{ opacity: 0.6, scale: 0.94 }}
-              onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={20} color={palette.text} />
+            <XStack alignItems="center" justifyContent="space-between">
+              <XStack
+                width={38}
+                height={38}
+                borderRadius={19}
+                alignItems="center"
+                justifyContent="center"
+                backgroundColor={palette.card}
+                borderWidth={StyleSheet.hairlineWidth}
+                borderColor={palette.border}
+                transition="quickest"
+                pressStyle={{ opacity: 0.6, scale: 0.94 }}
+                onPress={() => router.back()}>
+                <Ionicons name="chevron-back" size={20} color={palette.text} />
+              </XStack>
+
+              {/* 一首都没扫到时没有可搜的东西，放大镜就不占位置了。
+                  热区 44×44，视觉仍是 38 的圆，和返回键对称；展开后图标变 × 以便收起 */}
+              {state.tracks.length ? (
+                <XStack
+                  width={44}
+                  height={44}
+                  alignItems="center"
+                  justifyContent="center"
+                  transition="quickest"
+                  pressStyle={{ opacity: 0.6, scale: 0.94 }}
+                  onPress={toggleSearch}>
+                  <XStack
+                    width={38}
+                    height={38}
+                    borderRadius={19}
+                    alignItems="center"
+                    justifyContent="center"
+                    backgroundColor={searchOpen ? palette.accentSoft : palette.card}
+                    borderWidth={StyleSheet.hairlineWidth}
+                    borderColor={searchOpen ? palette.accentBorder : palette.border}>
+                    <Ionicons
+                      name={searchOpen ? 'close' : 'search'}
+                      size={19}
+                      color={searchOpen ? palette.accent : palette.text}
+                    />
+                  </XStack>
+                </XStack>
+              ) : null}
             </XStack>
+
+            {/* 搜索框只在展开时占位，收起时完全不占高度，不挤压原有头部 */}
+            {searchOpen ? (
+              <XStack
+                alignItems="center"
+                gap={8}
+                height={44}
+                paddingHorizontal={14}
+                borderRadius={22}
+                backgroundColor={palette.card}
+                borderWidth={StyleSheet.hairlineWidth}
+                borderColor={palette.border}>
+                <Ionicons name="search" size={17} color={palette.textTertiary} />
+                <TextInput
+                  value={keyword}
+                  onChangeText={setKeyword}
+                  placeholder="搜索本地歌曲、歌手、专辑"
+                  placeholderTextColor={palette.textTertiary}
+                  autoFocus
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  style={[styles.searchInput, { color: palette.text }]}
+                />
+                {keyword ? (
+                  <XStack
+                    width={44}
+                    height={44}
+                    marginRight={-12}
+                    alignItems="center"
+                    justifyContent="center"
+                    transition="quickest"
+                    pressStyle={{ opacity: 0.6 }}
+                    onPress={clearKeyword}>
+                    <XStack
+                      width={22}
+                      height={22}
+                      borderRadius={11}
+                      alignItems="center"
+                      justifyContent="center"
+                      backgroundColor={palette.cardAlt}>
+                      <Ionicons name="close" size={13} color={palette.textSecondary} />
+                    </XStack>
+                  </XStack>
+                ) : null}
+              </XStack>
+            ) : null}
 
             <XStack gap={16} alignItems="center">
               <XStack
@@ -141,7 +282,7 @@ export default function LocalMusicScreen() {
                 </Text>
                 {!state.loading ? (
                   <Text color={palette.textTertiary} fontSize={12}>
-                    共 {state.tracks.length} 首
+                    {countText}
                   </Text>
                 ) : null}
               </YStack>
@@ -172,6 +313,18 @@ export default function LocalMusicScreen() {
             <YStack alignItems="center" paddingVertical={70}>
               <Spinner size="large" color={palette.accent} />
             </YStack>
+          ) : state.tracks.length ? (
+            // 有歌却一行都没有 = 筛选没命中。
+            // 本地是一次性扫描，不存在「歌还在后面的页里」，所以这里直接给结论。
+            <YStack alignItems="center" paddingVertical={60} gap={10} paddingHorizontal={28}>
+              <Ionicons name="search" size={34} color={palette.textTertiary} />
+              <Text color={palette.textTertiary} fontSize={13} textAlign="center">
+                没有匹配的歌曲
+              </Text>
+              <TouchText onPress={clearFilter} fontSize={14}>
+                清除筛选
+              </TouchText>
+            </YStack>
           ) : (
             <YStack alignItems="center" paddingVertical={60} gap={10} paddingHorizontal={28}>
               <Ionicons name="musical-notes-outline" size={36} color={palette.textTertiary} />
@@ -183,11 +336,11 @@ export default function LocalMusicScreen() {
             </YStack>
           )
         }
-        renderItem={({ item, index }) => (
+        renderItem={({ item }) => (
           <SongListItem
-            track={item}
-            active={item.hash === activeHash}
-            onPress={() => playFrom(index)}
+            track={item.track}
+            active={item.track.hash === activeHash}
+            onPress={() => playFrom(item.index)}
           />
         )}
       />
@@ -204,6 +357,16 @@ export default function LocalMusicScreen() {
 }
 
 const styles = StyleSheet.create({
+  // 与 search.tsx / 歌单页的搜索输入保持一致：撑满 44 高的胶囊，Android 垂直居中
+  searchInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 15,
+    fontWeight: '500',
+    paddingTop: 2,
+    paddingBottom: 0,
+    textAlignVertical: 'center',
+  },
   headerGlow: {
     position: 'absolute',
     top: 0,

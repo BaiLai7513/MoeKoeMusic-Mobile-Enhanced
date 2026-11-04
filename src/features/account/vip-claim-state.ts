@@ -5,6 +5,7 @@ import { getApiSession } from '@/lib/kugou-api';
 import { readCache, writeCache } from '@/lib/offline-cache';
 
 import {
+  readClaimDayRecord,
   readSvipDayRecord,
   rememberSvipValid,
 } from './vip-local-state';
@@ -14,6 +15,7 @@ import {
   type ManualVipClaimOutcome,
 } from './vip-silent-claim';
 import { fetchVipStatus } from './vip-api';
+import { vipDayKey } from './vip-day';
 
 /**
  * 「我的」页面那颗 VIP 胶囊按钮的**共享状态**：自动领取、按钮点击、资料刷新三条路写的是同一份。
@@ -36,6 +38,15 @@ import { fetchVipStatus } from './vip-api';
  * 冷启动首帧就是正确状态，也不必为了显示一个布尔值打接口：
  * `moekoe.vip.svipDay`（一天一份）→ 首帧就能定；只有「不知道」时才由
  * `refreshConceptVip` 查一次 `/user/vip/detail`。
+ *
+ * `dailyClaimed`（今天领到没）来自两份**互相独立**的证据：
+ * 1. 「账号 + 日期」作用域下的界面缓存（下面 `storageKey`）；
+ * 2. 领取接口一回答就落盘的 `moekoe.vip.claimDay`（见 vip-local-state 的 `rememberClaimDay`）。
+ *
+ * 第二份是非要不可的：领取可能发生在**没有界面**的路径上（闹钟叫醒、后台开播），
+ * 进程若在「服务端说领到了」与「界面回调落盘」之间被杀，只有它记得今天领过 ——
+ * 否则重启后点 SVIP 会先白发一次领取请求。它记的是「额度用掉了」，**不是**「权益生效了」，
+ * 后者只有 `/user/vip/detail` 的回答（见 vip-reconcile）才算数。
  *
  * ## 每日过期怎么实现
  *
@@ -109,10 +120,7 @@ function createStore<T extends object>(initial: T) {
 const vipClaimStore = createStore(INITIAL_VIP_CLAIM_STATE);
 
 function todayKey(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
+  return vipDayKey();
 }
 
 /**
@@ -220,6 +228,10 @@ let syncToken = 0;
  * 除了「今天领没领」，这里还顺带把胶囊需要的本地记录读回来：
  * `moekoe.vip.svipDay` —— 今天这一份 SVIP 记录（没有就保持「未知」，由页面去查一次）。
  * 它与账号/日期无关，所以上面那些作用域判断对它不适用，读到就登记。
+ *
+ * 另一份是 `moekoe.vip.claimDay`（「今天领到没」的服务端回答，按账号 + 自然日）：
+ * 它**在作用域判断之后**才用 —— 换账号/跨天时它读到的本来就是新作用域，但把旧作用域的
+ * 结论写进新作用域是另一回事，所以宁可等作用域稳定。
  */
 export function syncFromStorage(): Promise<void> {
   const scope = storageKey();
@@ -233,9 +245,10 @@ export function syncFromStorage(): Promise<void> {
 
   syncInFlight = (async () => {
     ensureScope();
-    const [stored, svipRecord] = await Promise.all([
+    const [stored, svipRecord, claimDay] = await Promise.all([
       readCache<PersistedVipClaim>(scope),
       readSvipDayRecord(),
+      readClaimDayRecord(),
     ]);
 
     // 本地记录与账号无关，先登记：即使下面因为作用域变了而提前返回，
@@ -250,6 +263,16 @@ export function syncFromStorage(): Promise<void> {
     // 直接丢掉。不丢的话会把上一个账号「今天已领」的状态写到新账号头上。
     if (scope !== storageKey()) {
       return;
+    }
+
+    /*
+     * 「今天领过没」还有一份**独立**证据：领取接口一回答就落盘的 claimDay 记录
+     * （见 vip-local-state 的 `rememberClaimDay`）。它比界面缓存可靠 —— 缓存是在
+     * 界面回调里写的，进程若在「领到」与「回调」之间被杀，只有它记得今天领过，
+     * 升级前置条件因此不会丢（见 vip-silent-claim 文件头对「可升级判断依据」的说明）。
+     */
+    if (claimDay) {
+      vipClaimStore.setState({ dailyClaimed: true });
     }
 
     applyStoredState(stored);
@@ -268,7 +291,6 @@ export function syncFromStorage(): Promise<void> {
 /** 按钮与 toast 的文案集中在这里，避免「领取」和「升级」两条链路的措辞各自漂移。 */
 const TOAST = {
   dailyClaimed: '已领取 1 天畅听 VIP',
-  dailyAlready: '今天的畅听 VIP 已经领过啦',
   upgraded: '已升级为概念版 VIP',
   /** 风控文案要给出**出路**，只说「领取失败」用户会一直点，越点越糟。 */
   risk: '账号触发风控，请明天再试或到酷狗官方客户端领取',
@@ -334,7 +356,10 @@ export async function claimDaily(): Promise<ManualVipClaimOutcome> {
     case 'already':
       vipClaimStore.setState({ dailyClaimed: true });
       persist();
-      showToast(TOAST.dailyAlready);
+      // 不弹提示：服务端说「今天已经领过」时，用户并没有得到任何新东西，
+      // 这一下只是把本地状态补正。原来这里会弹「已领取今日 VIP」，在零点到四点之间
+      // （服务端还没换日、本地以为新的一天开始了）尤其刺眼 —— 用户看到的是
+      // 「我没领啊，怎么就说已领取了」。真正的成功提示只留给自动领取那一次。
       return 'already';
     case 'risk':
       showToast(TOAST.risk);
@@ -349,6 +374,33 @@ export async function claimDaily(): Promise<ManualVipClaimOutcome> {
       showToast(TOAST.claimFailed);
       return 'failed';
   }
+}
+
+/**
+ * 用**持久化证据**补齐「今天已经领过畅听 VIP」这个状态，返回补齐后的结果。
+ *
+ * 为什么需要：内存状态与「账号 + 日期」缓存都只在界面回调里写，而领取可能发生在
+ * **完全没有界面**的路径上（闹钟叫醒、后台开播）。进程若在「服务端说领到了」与
+ * 「界面回调落盘」之间被杀，重启后本地就以为今天没领过 —— 用户点 SVIP 会先白发一次
+ * 领取请求（服务端只会回 131001），升级的前置条件也被无谓地拦住。
+ *
+ * 证据是 `moekoe.vip.claimDay`（领取接口一回答就写，见 vip-local-state 的
+ * `rememberClaimDay`）。它回答的是「今天这一份额度用掉了」，与「权益有没有生效」是
+ * 两个维度 —— 所以**不能**用 `vipExpiresAt`（昨天的权益今天往往还有效）来代替它。
+ */
+async function restoreDailyClaimedFromEvidence(): Promise<boolean> {
+  if (vipClaimStore.getState().dailyClaimed) {
+    return true;
+  }
+
+  const claimDay = await readClaimDayRecord();
+  if (!claimDay) {
+    return false;
+  }
+
+  vipClaimStore.setState({ dailyClaimed: true });
+  persist();
+  return true;
 }
 
 /**
@@ -370,7 +422,9 @@ export async function claimSvip(): Promise<void> {
     return;
   }
 
-  if (!vipClaimStore.getState().dailyClaimed) {
+  // 先用持久化证据判断「今天领过没」：重启/后台领取之后，内存与缓存可能都还是 false，
+  // 那种情况下第一步会白发一次领取请求（服务端只会回 131001）
+  if (!(await restoreDailyClaimedFromEvidence())) {
     const daily = await claimDaily();
     if (daily !== 'claimed' && daily !== 'already') {
       return;
@@ -438,7 +492,19 @@ export async function upgradeToConcept(): Promise<void> {
   const snapshot = vipClaimStore.getState();
   // 服务端要求「当天必须先领过畅听 VIP」才允许升级；没领就点的话请求必然失败，
   // 白白多打一次接口（还可能被算进风控），所以这里直接拦下，不给它发出去的机会。
-  if (snapshot.loading || snapshot.upgraded || !snapshot.dailyClaimed) {
+  if (snapshot.loading || snapshot.upgraded) {
+    return;
+  }
+
+  // 前置条件的判断用**持久化证据**而不是只看内存/缓存：重启或后台领取之后，
+  // 内存里的 dailyClaimed 可能还是 false（见 restoreDailyClaimedFromEvidence）
+  if (!(await restoreDailyClaimedFromEvidence())) {
+    return;
+  }
+
+  // 等证据的这段时间里可能已经有另一次点击在飞了（读存储是异步的）：再挡一次，
+  // 否则两次点击会各自走一遍升级流程（真正的硬上限仍由升级的按天标记兜住）
+  if (vipClaimStore.getState().loading || vipClaimStore.getState().upgraded) {
     return;
   }
 
@@ -458,9 +524,12 @@ export async function upgradeToConcept(): Promise<void> {
     case 'claimed':
     case 'already':
       // 两种都算达成：置灰按钮，避免用户反复点到风控。
-      // conceptValid 一起置真 —— 升级成功就等于「此刻有概念版」，
-      // 胶囊要立刻变灰，不能等下一次拉资料（那中间用户会以为没成功而再点一次）。
-      // SVIP 的「今天这一份」记录由 attemptSvipUpgrade 写好了。
+      // conceptValid 一起置真 = **界面反馈**（服务端刚回了成功），胶囊要立刻变灰，
+      // 否则用户会以为没成功而再点一次。
+      //
+      // 注意这不是「本地判成已生效」：**持久化**的权威值（`moekoe.vip.svipDay` /
+      // `tierExpiry`）只由 `attemptSvipUpgrade` 里那次核对通过后写入（见 vip-reconcile）。
+      // 核对没成时磁盘上仍然是「未知」，下一次冷启动会老老实实再查一次。
       vipClaimStore.setState({ upgraded: true, dailyClaimed: true, conceptValid: true });
       persist();
       showToast(TOAST.upgraded);
@@ -498,6 +567,9 @@ export function markDailyClaimed(): void {
  *
  * 自动那一步不弹 toast（每一步都弹会变成骚扰），但状态必须落下来：否则胶囊要等到
  * 下次拉资料才变灰，中间用户会以为没成功而再点一次 —— 那一次就是白打的请求。
+ *
+ * 与 `upgradeToConcept` 同一个口径：这里置真的 `conceptValid` 只是**界面反馈**，
+ * 持久化的权威值仍然要等 `attemptSvipUpgrade` 里那次核对通过（见 vip-reconcile）。
  */
 export function markSvipUpgraded(): void {
   ensureScope();

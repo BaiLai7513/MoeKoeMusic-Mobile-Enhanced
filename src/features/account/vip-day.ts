@@ -1,34 +1,58 @@
 /**
- * 「VIP 的一天」= **设备本地时区**的自然日（`getFullYear/getMonth/getDate`）。
+ * 「VIP 的一天」= **东八区（UTC+8）每日零点**为界的自然日。
  *
- * ## 为什么是设备本地、而不是固定 UTC+8
+ * ## 为什么是「零点」而不是某个固定时刻
  *
- * 用户明确要求过：**不要**改成固定偏移的时区。理由是对的 —— 手机的时间与服务器的时间
- * 本来就是同步的（同一个时区），而日领 VIP 的额度是按「哪一天」算的，本地日期就是服务端
- * 认的那一天（`receive_day` 也一直是本地日期，实测可用）。
+ * 每日领取额度在服务端是按日算的，而用户能观察到的规则是：**换日之后就能再领一次**
+ * ——19:17 领过的那次，第二天 05:27 就又领到了，中间只隔 10 小时，说明并不是「+24h」。
  *
- * 反过来，写死 UTC+8 会在设备时区不是东八区时**引入**偏差：用户在国外、漫游或手动改过
- * 时区时，本地「今天」与服务端的口径就会错开一天，出现「本地以为没领过 → 白发一次请求
- * （服务端回 131001）」或者「本地以为已经领过 → 当天真的漏领」两种都很难查的故障。
+ * 早先由观测校准推出过 00:28、后来又被改成固定 04:00，两个都是**保守猜测**：
+ * 只会让 00:00–04:00 的额度白等一晚，还让「可领取时间」这个概念与用户的直觉
+ * （过了零点就是新的一天）对不上。现在用最朴素也最好解释的口径：**东八区零点换日**。
  *
  * ## 集中在这里的原因
  *
- * 「今天」这个概念被四处共用：按天标记（自动领取 / 手动领取 / 两次升级）、SVIP 每日记录
- * 的 `day` 字段、以及各种跨零点守卫。四处各抄一份迟早会漂移，所以统一从本模块取。
- * （发给服务端的 `receive_day` 仍由 vip-api 自己算，行为与改动前完全一致。）
+ * 「今天」被四处共用：按天标记（自动/手动领取、两次升级）、SVIP 每日记录、
+ * 发给服务端的 `receive_day`、闹钟排期、各种跨零点守卫。四处各抄一份迟早会漂移。
  */
 
+/** 每日重置的小时（东八区）：零点。 */
+export const VIP_DAY_RESET_HOUR = 0;
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/** 东八区相对 UTC 的固定偏移：中国不实行夏令时，全年恒定。 */
+const UTC8_OFFSET_MS = 8 * HOUR_MS;
+
 /**
- * 设备本地时区的日期串（`YYYY-MM-DD`）。
+ * 当前「VIP 日」的日期串（`YYYY-MM-DD`），按东八区换日。
  *
- * 与 `receive_day`、各处按天标记、SVIP 记录里的 `day` 必须是同一个日历，
- * 否则两边的「今天」会打架。
+ * 实现上是「把时间轴搬到东八区，再取日期」。取值一律走 `getUTCxxx`：
+ * 设备时区不能参与运算，否则「今天」会跟着用户所在的时区漂。
  */
-export function localDayKey(now: number = Date.now()): string {
-  const date = new Date(now);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
+export function vipDayKey(now: number = Date.now()): string {
+  const shifted = new Date(now + UTC8_OFFSET_MS - VIP_DAY_RESET_HOUR * HOUR_MS);
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${month}-${day}`;
+}
+
+/**
+ * 下一个 VIP 日开始的绝对时间戳 = **下一个东八区零点**。
+ *
+ * 先由 `vipDayKey` 反解出当前 VIP 日的起点，再加一天。UTC+8 没有夏令时，一天恒为
+ * 24 小时，所以这里可以直接加 `DAY_MS` —— 也正因为如此，不能改回 `setHours(24,…)`
+ * 那套「设备本地」算法。
+ *
+ * 它唯一的用途是**排闹钟**（换日之后叫醒 App 去领），不再参与「能不能领」的判断：
+ * 那个判断只看「本 VIP 日领过没有」。
+ */
+export function nextVipDayStartMs(now: number = Date.now()): number {
+  const [year, month, day] = vipDayKey(now).split('-').map(Number);
+  const startOfVipDay =
+    Date.UTC(year, month - 1, day, VIP_DAY_RESET_HOUR, 0, 0, 0) - UTC8_OFFSET_MS;
+  return startOfVipDay + DAY_MS;
 }
 
 /**
