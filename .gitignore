@@ -41,3 +41,7 @@ example
 # generated native folders
 /ios
 /android
+
+# 签名密钥不进仓库（正式包用私有 release 密钥，见 README）
+native/android/keystore/*.keystore
+*.keystore

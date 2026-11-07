@@ -134,17 +134,14 @@ function withPlayerPackage(config) {
 }
 
 /**
- * 4) 还原签名用的 debug.keystore
+ * 4) 还原调试签名用的 debug.keystore
  *
- * **为什么必须做**：Android 不允许「签名不同」的 APK 覆盖安装
- * （`INSTALL_FAILED_UPDATE_INCOMPATIBLE`），用户只能先卸载 —— 连带丢掉登录态。
- * 而 `expo prebuild` 会把 android/ 清空并**重新生成一个全新的随机 debug 密钥**，
- * 签名一变，所有老用户就再也升级不上去了。
+ * **现在只影响本地调试构建**：正式包从 1.0.4 起改用独立的 release 密钥签名，
+ * 调试密钥不再决定发布包的身份，因此**不再纳入版本管理**。
  *
- * 因此把该密钥纳入版本管理，prebuild 后原样拷回，保证跨版本签名恒定。
- * （这是个人项目在「不上架应用商店」前提下的务实取舍：密钥公开，
- *   但换来了可预期的覆盖升级。若日后要正经分发，应改用独立 release 密钥
- *   并接受一次「必须卸载重装」的迁移。）
+ * `expo prebuild` 会清空 android/ 并生成新的随机调试密钥；本地若存在
+ * `native/android/keystore/debug.keystore` 就原样拷回（保持本地调试构建可覆盖安装），
+ * 不存在则由 prebuild 自己生成 —— 两者都不影响正式发布包。
  */
 function withDebugKeystore(config) {
   return withDangerousMod(config, [
