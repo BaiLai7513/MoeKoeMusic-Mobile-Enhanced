@@ -165,6 +165,8 @@ let failStreak = 0;
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 // 每次“建立新队列”都会自增；后台补齐歌单剩余曲目时靠它判断队列是否已被替换。
 let queueGeneration = 0;
+// 追加队列是否在进行中（进程内串行化，避免 JS 长度与原生长度错位）。
+let appendingQueue = false;
 
 // ---------------- 「因缺少 VIP 而播不了」通知 ----------------
 //
@@ -233,8 +235,8 @@ const resolvedUris = new Map<number, string>();
 let playlistHashes: string[] = [];
 /** 正在解析中的下标，避免重复请求。 */
 const resolvingIndexes = new Set<number>();
-/** 提前解析后面多少首。系统切歌是原生直接推进的，撞上占位符会失败，所以多备一些。 */
-const PREFETCH_AHEAD = 8;
+/** 预解析并发上限：同时最多几首在解析（防止一条队列瞬间打满请求）。 */
+const PREFETCH_CONCURRENCY = 2;
 
 /** 解析某一首的直链并写回播放列表；返回直链或 null。 */
 async function resolveIndex(index: number): Promise<string | null> {
@@ -271,33 +273,65 @@ async function resolveIndex(index: number): Promise<string | null> {
 }
 
 /**
- * 提前把将要播到的曲目解析好，交给 ExoPlayer 的列表。
+ * 只解析「马上会播到的那一两首」。
  *
- * 关键：不能只按「当前 + 顺序后 N 首」预解析 —— 随机模式下原生会跳到**乱序**的下标，
- * 那样几乎必然撞上占位符（表现为一首放完卡住几秒）。
- * 所以这里同时做两件事：
- * 1. 按原生报上来的真实「下一首/上一首」下标解析（随机模式也准）
- * 2. 再按顺序多备几首，覆盖列表循环时的连续播放
+ * ## 为什么要改
+ *
+ * 早先是「当前 + 顺序后 8 首」一次性铺开：一次开播就有 9–10 首在解析，而每首还要
+ * 先查特权档位、再按降级链取直链 —— 实测日志里一天下来大半请求是给「不会被播到」
+ * 的歌发的。用户的话是「听哪首解析哪首」。
+ *
+ * ## 四种模式怎么取舍
+ *
+ * | 模式 | 下一首能不能预测 | 解析几首 |
+ * |---|---|---|
+ * | 单曲循环 | 就是自己 | **0**（当前那首本来就有直链） |
+ * | 顺序播放 | 确定是 index+1 | **2**（下一首 + 再下一首，连按两次也不卡） |
+ * | 列表循环 | index+1，末尾回 0 | **2**（同上，末尾那次靠原生报的 nextIndex） |
+ * | 随机 | 乱序，但原生知道 | **1**（只解原生报上来的 nextIndex） |
+ *
+ * 撞上没解析的曲目也不会卡死：原生推进后 `applyNativeState` 会带着新下标回来，
+ * 这里再补解析即可 —— 代价是多一个网络往返，换来的是请求量下降一个数量级。
  */
 function prefetchAround(index: number, nativeNext?: number, nativePrevious?: number) {
-  const { queue } = playerStore.getState();
+  const { queue, mode } = playerStore.getState();
+  const last = queue.length - 1;
+  if (last < 0) {
+    return;
+  }
 
   const targets = new Set<number>();
-  if (typeof nativeNext === 'number' && nativeNext >= 0) {
-    targets.add(nativeNext);
-  }
-  if (typeof nativePrevious === 'number' && nativePrevious >= 0) {
-    targets.add(nativePrevious);
-  }
-  for (let k = index; k <= Math.min(index + PREFETCH_AHEAD, queue.length - 1); k += 1) {
-    targets.add(k);
+  const add = (k?: number) => {
+    if (typeof k === 'number' && k >= 0 && k <= last) {
+      targets.add(k);
+    }
+  };
+
+  // 当前曲目永远要解析（切歌时调用方已解析过，这里是兜底）
+  add(index);
+
+  if (mode !== 'single') {
+    add(typeof nativeNext === 'number' && nativeNext >= 0 ? nativeNext : index + 1);
+    if (mode === 'sequence') {
+      // 顺序/列表循环可预测：再多备一首，连按两次「下一首」也不至于停一下
+      add(index + 2);
+    }
   }
 
+  // 上一首只在用户回退时才需要；已播过的一般已在 resolvedUris 里，这里只补漏
+  add(nativePrevious);
+
+  let started = 0;
   targets.forEach((k) => {
     const track = queue[k];
-    if (track && playlistHashes[k] === track.hash && !resolvedUris.has(k)) {
-      void resolveIndex(k);
+    if (!track || playlistHashes[k] !== track.hash || resolvedUris.has(k)) {
+      return;
     }
+    if (started >= PREFETCH_CONCURRENCY) {
+      return;
+    }
+    started += 1;
+    void resolveIndex(k);
   });
 }
 
@@ -541,6 +575,27 @@ function adoptNativeIndex(index: number) {
   });
   progressStore.setState({ positionMs: 0, durationMs: track.durationMs ?? 0 });
 
+  console.log(
+    `[play] ▶ #${index + 1}/${queue.length} ${track.title} - ${track.artist ?? ''} · ${
+      playerStore.getState().mode
+    }（原生推进）`
+  );
+
+  /*
+   * 兜底：原生自己推进到的这一首如果还没解析（预解析只备了后面一两首，跨越「换页」或
+   * 连按两次下一首时可能撞上），立刻补解析并原地跳过去。
+   *
+   * 不补的话，ExoPlayer 会拿占位符去加载 → 报错 → 走 recoverFromPlaybackError 的
+   * 「重新解析当前曲目」分支，中间要多绕一到两个往返，表现就是「卡一下」。
+   */
+  if (!resolvedUris.has(index)) {
+    void resolveIndex(index).then((uri) => {
+      if (uri && playerStore.getState().index === index) {
+        void PlayerManager.seekToIndex(index);
+      }
+    });
+  }
+
   void loadLyricLines(track)
     .then((lines) => {
       if (playerStore.getState().track?.hash !== track.hash) {
@@ -621,6 +676,12 @@ async function loadTrackAt(index: number) {
     // 当前曲目真的播出来了 → 之前那条「缺 VIP」的记录已经过期作废
     vipBlockedHash = null;
     playerStore.setState({ loading: false, playing: true, buffering: false });
+    // 播放记录：排查「到底播到了哪一首 / 播放到第几页停了」时直接看这一行
+    console.log(
+      `[play] ▶ #${index + 1}/${queue.length} ${track.title} - ${track.artist ?? ''} · ${
+        playerStore.getState().mode
+      }`
+    );
     if (source.durationMs > 0) {
       progressStore.setState({ durationMs: source.durationMs });
     }
@@ -769,8 +830,12 @@ export const playerActions = {
   /**
    * 把后续分页的曲目追加到当前队列末尾（按 hash 去重）。
    * generation 与当前队列不一致（队列已被替换/清空）时不追加并返回 false。
+   *
+   * **原生播放列表必须一起长**：`setPlaylist` 只在开播那一刻下发一次，只加 JS 队列的话，
+   * 播到已下发部分末尾时 `hasNextMediaItem()` 仍是 false —— 这就是「每日推荐第一页放完
+   * 卡住、进不了第二页」的根因。
    */
-  appendTracks(tracks: PlayerTrack[], generation: number): boolean {
+  async appendTracks(tracks: PlayerTrack[], generation: number): Promise<boolean> {
     if (generation !== queueGeneration) {
       return false;
     }
@@ -782,11 +847,44 @@ export const playerActions = {
 
     const seen = new Set(queue.map((track) => track.hash));
     const fresh = tracks.filter((track) => track.hash && !seen.has(track.hash));
-    if (fresh.length) {
-      playerStore.setState({ queue: [...queue, ...fresh] });
+    if (!fresh.length) {
+      return true;
     }
 
-    return true;
+    // 串行化：并发追加会让「JS 队列长度」和「原生列表长度」错开
+    if (appendingQueue) {
+      return false;
+    }
+    appendingQueue = true;
+
+    try {
+      // 先让原生列表长出来，成功之后才改 JS 队列：两边一旦错开，index→hash 映射就会串位
+      const items = fresh.map((track) => buildQueueItem(track, pendingUri(track.hash)));
+      const appended = await PlayerManager.appendItems(items);
+      if (!appended) {
+        console.warn('[player] 原生播放列表追加失败，队列保持原长度（下次重建队列时会补齐）');
+        return false;
+      }
+
+      // await 期间队列可能已被替换（用户点了别的歌单）：此时不要再写 JS 状态
+      if (generation !== queueGeneration) {
+        return false;
+      }
+      const current = playerStore.getState().queue;
+      if (current.length !== queue.length) {
+        return false;
+      }
+
+      // playlistHashes 负责把原生下标映射回 JS 曲目，必须跟着一起长
+      playlistHashes = [...playlistHashes, ...fresh.map((track) => track.hash)];
+      playerStore.setState({ queue: [...current, ...fresh] });
+      console.log(
+        `[player] 队列已补齐：${current.length} → ${current.length + fresh.length} 首（原生列表同步追加）`
+      );
+      return true;
+    } finally {
+      appendingQueue = false;
+    }
   },
 
   async playTrackNow(track: PlayerTrack) {

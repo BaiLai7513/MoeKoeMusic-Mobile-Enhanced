@@ -76,6 +76,7 @@ export function pendingUri(mediaId: string): string {
 type MoeKoePlayerModule = {
   setPlaylist(items: NativeQueueItem[], startIndex: number): Promise<boolean>;
   replaceItem(index: number, url: string, metadata: PlayerMetadataPayload): Promise<boolean>;
+  appendItems(items: NativeQueueItem[]): Promise<boolean>;
   seekToIndex(index: number): Promise<boolean>;
   setPlaybackMode(repeatMode: number, shuffleEnabled: boolean): Promise<boolean>;
   pause(): Promise<boolean>;
@@ -237,6 +238,27 @@ export const PlayerManager = {
   /** 把已解析出直链的曲目写回播放列表（预解析后调用）。失败只记日志。 */
   replaceItem(index: number, track: PlayerTrack, url: string): Promise<void> {
     return guarded('replaceItem', () => native!.replaceItem(index, url, metadataFor(track)));
+  },
+
+  /**
+   * 追加后续分页的曲目到**原生**播放列表末尾。
+   *
+   * 必须与 JS 队列同步：只加 JS 队列的话，播到已下发部分的末尾时原生的
+   * `hasNextMediaItem()` 仍是 false —— 表现就是「播放全部到第一页末尾卡住，不进第二页」。
+   *
+   * 返回 false = 没有原生模块 / 追加失败（调用方应保持队列不变，避免 JS 与原生错位）。
+   */
+  async appendItems(items: NativeQueueItem[]): Promise<boolean> {
+    if (!native || !items.length) {
+      return false;
+    }
+    try {
+      const ok = await native.appendItems(items);
+      return ok !== false;
+    } catch (error) {
+      console.warn('[PlayerManager] appendItems 失败:', error);
+      return false;
+    }
   },
 
   /** 按播放列表下标跳转；调用方需确保该下标已解析出直链。 */

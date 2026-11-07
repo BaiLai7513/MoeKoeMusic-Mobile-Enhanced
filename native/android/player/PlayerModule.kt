@@ -266,6 +266,46 @@ class PlayerModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * 追加后续分页的曲目到播放列表末尾（JS 后台补齐歌单时调用）。
+     *
+     * 为什么必须有它：`setPlaylist` 只在开播那一刻下发一次，之后 JS 侧「补全歌单剩余页」
+     * 只加了 JS 队列。原生列表长度还停在第一页，播到末尾时 `hasNextMediaItem()` 是 false
+     * —— 表现就是「第一页最后一首放完卡住，不进第二页」。
+     *
+     * 用 `addMediaItems` 而不是重建列表：重建会让当前曲目重新加载（听感上就是一次卡顿）。
+     */
+    @ReactMethod
+    fun appendItems(items: ReadableArray, promise: Promise) {
+        mainHandler.post {
+            val controller = mediaController
+            if (controller == null) {
+                promise.resolve(false)
+                return@post
+            }
+            try {
+                val mediaItems = (0 until items.size()).mapNotNull { i ->
+                    val map = items.getMap(i) ?: return@mapNotNull null
+                    val url = map.getString("url") ?: return@mapNotNull null
+                    buildMediaItem(url, map)
+                }
+                if (mediaItems.isEmpty()) {
+                    promise.resolve(false)
+                    return@post
+                }
+                controller.addMediaItems(mediaItems)
+                Log.i(
+                    TAG,
+                    "appendItems() 已追加 ${mediaItems.size} 首，列表长度=${controller.mediaItemCount}"
+                )
+                promise.resolve(true)
+            } catch (error: Throwable) {
+                Log.e(TAG, "appendItems() 失败", error)
+                promise.reject("E_APPEND_ITEMS_FAILED", error.message, error)
+            }
+        }
+    }
+
     /** 把某一项替换成已解析直链的版本（JS 预解析后调用）。 */
     @ReactMethod
     fun replaceItem(index: Double, url: String, metadata: ReadableMap, promise: Promise) {

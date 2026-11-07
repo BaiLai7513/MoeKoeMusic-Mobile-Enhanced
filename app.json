@@ -2,14 +2,14 @@
   "expo": {
     "name": "MoeKoe",
     "slug": "moekoe",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moekoe",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.moekoe.music",
-      "versionCode": 13,
+      "versionCode": 14,
       "adaptiveIcon": {
         "backgroundColor": "#F6F9FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -41,7 +41,7 @@
         "expo-audio",
         {
           "enableBackgroundPlayback": true,
-          "microphonePermission": "允许 $(PRODUCT_NAME) 访问麦克风，用于听歌识曲"
+          "microphonePermission": "鍏佽 $(PRODUCT_NAME) 璁块棶楹﹀厠椋庯紝鐢ㄤ簬鍚瓕璇嗘洸"
         }
       ],
       [

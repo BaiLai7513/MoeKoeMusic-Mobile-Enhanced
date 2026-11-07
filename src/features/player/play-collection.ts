@@ -93,7 +93,7 @@ async function fillRemaining(options: {
 
     if (fresh.length) {
       dryPages = 0;
-      if (!playerActions.appendTracks(fresh, generation)) {
+      if (!(await playerActions.appendTracks(fresh, generation))) {
         return;
       }
     } else {
