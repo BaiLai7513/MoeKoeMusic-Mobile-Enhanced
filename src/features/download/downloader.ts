@@ -68,6 +68,10 @@ export async function downloadTrack(
   const fileName = `${artist} - ${title}.${source.extName}`;
   const subPath = `${DOWNLOAD_FOLDER}/${fileName}`;
 
+  console.log(
+    `[download] 入队 ${track.title} - ${track.artist || '?'} · 期望 ${quality} → 实际 ${source.quality}`
+  );
+
   await native.enqueue(
     source.uri,
     subPath,
@@ -99,6 +103,8 @@ export async function downloadTracks(
   let ok = 0;
   let failed = 0;
 
+  console.log(`[download] 批量开始 ${tracks.length} 首 · 期望音质 ${quality}`);
+
   for (let index = 0; index < tracks.length; index += 1) {
     try {
       await downloadTrack(tracks[index], quality);
@@ -115,5 +121,6 @@ export async function downloadTracks(
     }
   }
 
+  console.log(`[download] 批量结束：成功 ${ok} 首，失败 ${failed} 首`);
   return { ok, failed };
 }

@@ -123,6 +123,7 @@ function isApiResultLike(value: unknown): value is { status: number; body: unkno
 /** 上传 PCM 指纹并返回按可信度排序的匹配结果；接口无匹配时返回空数组。 */
 export async function recognizeAudio(pcm: Uint8Array): Promise<RecognizeMatch[]> {
   await bootstrapMobileApi();
+  console.log(`[recognize] 上传指纹 ${Math.round(pcm.byteLength / 1024)} KB`);
 
   let body: unknown;
   try {
@@ -133,18 +134,32 @@ export async function recognizeAudio(pcm: Uint8Array): Promise<RecognizeMatch[]>
   } catch (error) {
     // 无匹配时服务端返回 status=0，请求层会把它当失败抛出，这里视作"没有识别到"
     if (isApiResultLike(error)) {
+      console.log('[recognize] 没有识别到匹配曲目');
       return [];
     }
+    console.warn('[recognize] 识曲请求失败:', error);
     throw error;
   }
 
   const record = toRecord(body);
   if (pickNumber(record.status) !== 1) {
+    console.log('[recognize] 没有识别到匹配曲目');
     return [];
   }
 
-  return toRecords(record.data)
+  const matches = toRecords(record.data)
     .map(mapMatch)
     .filter((match): match is RecognizeMatch => Boolean(match))
     .sort((a, b) => b.confidence - a.confidence);
+
+  const top = matches[0];
+  console.log(
+    top
+      ? `[recognize] 匹配 ${matches.length} 首，最接近: ${top.track.title} - ${top.track.artist} (${Math.round(
+          top.confidence
+        )})`
+      : '[recognize] 没有识别到匹配曲目'
+  );
+
+  return matches;
 }

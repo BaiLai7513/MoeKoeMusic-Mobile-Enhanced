@@ -167,7 +167,11 @@ async function searchLists(keywords: string, page: number, type: SearchTab) {
   });
 
   const data = toRecord(toRecord(response.body).data);
-  return { records: toRecords(data.lists), total: pickNumber(data.total) };
+  const records = toRecords(data.lists);
+  const total = pickNumber(data.total);
+  // 搜索链路日志：关键词、页码、返回条数。**不打印任何账号信息**。
+  console.log(`[search] ${type} "${keywords}" 第${page}页 → ${records.length}/${total || '?'} 条`);
+  return { records, total };
 }
 
 export async function searchSongs(keywords: string, page: number): Promise<SearchSongsPage> {

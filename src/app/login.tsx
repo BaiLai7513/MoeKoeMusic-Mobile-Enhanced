@@ -589,6 +589,7 @@ export default function LoginScreen() {
 
     setSendingCode(true);
     setNotice(null);
+    console.log(`[login] 请求验证码 ${maskPhone(mobile)}`);
 
     try {
       await bootstrapMobileApi();
@@ -596,12 +597,14 @@ export default function LoginScreen() {
       if (!isApiSuccess(response.body)) {
         throw new Error(describeApiFailure(response.body, '验证码发送失败'));
       }
+      console.log(`[login] 验证码已发送 ${maskPhone(mobile)}`);
 
       setCountdown(SMS_COOLDOWN_SECONDS);
       // 落盘：杀掉进程重开也不能立刻再发，否则反复请求会触发酷狗风控
       void startSmsCooldown();
       setNotice({ text: `验证码已发送至 ${maskPhone(mobile)}`, tone: 'info' });
     } catch (error) {
+      console.warn(`[login] 验证码发送失败 ${maskPhone(mobile)}:`, error);
       setNotice({ text: describeAuthError(error, '验证码发送失败'), tone: 'error' });
     } finally {
       setSendingCode(false);
@@ -625,6 +628,7 @@ export default function LoginScreen() {
     setLoggingIn(true);
     setPendingUserid(selectedUserid ?? null);
     setNotice(null);
+    console.log(`[login] 验证码登录 ${maskPhone(mobile)}${selectedUserid ? '（指定账号）' : ''}`);
 
     try {
       await bootstrapMobileApi();
@@ -637,6 +641,7 @@ export default function LoginScreen() {
         throw response;
       }
 
+      console.log('[login] 验证码登录成功');
       finishLogin();
       return;
     } catch (error) {
@@ -644,11 +649,13 @@ export default function LoginScreen() {
       const options = body ? readAccountOptions(body) : [];
       if (options.length > 0 && !selectedUserid) {
         // 一个手机号绑定多个账号：先选择要登录的账号，再带 userid 重试
+        console.log(`[login] 该手机号绑定 ${options.length} 个账号，等待选择`);
         setAccountOptions(options);
         setNotice({ text: '该手机号绑定了多个账号，请选择要登录的账号', tone: 'info' });
         return;
       }
 
+      console.warn(`[login] 验证码登录失败 ${maskPhone(mobile)}:`, describeAuthError(error, '登录失败'));
       setNotice({ text: describeAuthError(error, '登录失败'), tone: 'error' });
     } finally {
       setLoggingIn(false);
@@ -671,6 +678,7 @@ export default function LoginScreen() {
 
     setPasswordLoggingIn(true);
     setNotice(null);
+    console.log(`[login] 密码登录 ${maskPhone(username)}${afterVerify ? '（二次验证后重试）' : ''}`);
 
     try {
       await bootstrapMobileApi();
@@ -679,6 +687,7 @@ export default function LoginScreen() {
         throw response;
       }
 
+      console.log('[login] 密码登录成功');
       finishLogin();
       return;
     } catch (error) {
@@ -687,15 +696,18 @@ export default function LoginScreen() {
       // 密码登录可能触发二次安全验证（错误码 20028），验证通过后重试一次
       const challenge = body ? readSsaChallenge(body) : null;
       if (challenge && !afterVerify) {
+        console.log('[login] 触发二次安全验证');
         await resolveSsaChallenge(challenge);
         return;
       }
 
       if (body && readAccountOptions(body).length > 0) {
+        console.warn('[login] 该账号绑定多个用户，密码登录不可用');
         setNotice({ text: '该账号绑定了多个用户，请改用「验证码登录」选择账号', tone: 'error' });
         return;
       }
 
+      console.warn(`[login] 密码登录失败:`, describeAuthError(error, '登录失败'));
       setNotice({
         text: describeAuthError(error, afterVerify ? '验证已通过，但登录失败，请重试' : '登录失败'),
         tone: 'error',
