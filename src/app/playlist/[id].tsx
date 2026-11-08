@@ -67,6 +67,9 @@ export default function PlaylistScreen() {
     error: '',
   });
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
+  // 收藏状态：以「我的歌单」里有没有同 listid 为准，收藏成功后本地先乐观置真
+  const [collecting, setCollecting] = useState(false);
+  const [collectedOnce, setCollectedOnce] = useState(false);
   // 歌单内搜索：默认收起（不占列表高度），点右上角放大镜才展开
   const [searchOpen, setSearchOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -116,6 +119,24 @@ export default function PlaylistScreen() {
   }, [state.tracks, loweredKeyword]);
 
   const totalCount = state.info?.count || state.tracks.length;
+  const collectedPlaylist = state.info?.listid
+    ? library.playlists.find((item) => item.listid === state.info?.listid)
+    : undefined;
+  const collected = collectedOnce || Boolean(collectedPlaylist);
+
+  /*
+   * 「收藏」按钮只对**从搜索点进来的、还没收藏的**歌单显示：
+   * 已创建 / 已收藏的歌单都在 `library.playlists` 里，命中就不显示。
+   *
+   * 判定结果在首次算出来后就**冻结**（`collectEligibleRef`）：
+   * - 不能在收藏成功后重新计算，否则按钮会突然消失 → 整行重排（就是「点了收藏布局变了」）；
+   * - 也不能在 library 还没加载完时算，否则自己的歌单会先闪出一个「收藏」按钮。
+   */
+  const collectEligibleRef = useRef<boolean | null>(null);
+  if (collectEligibleRef.current === null && library.status === 'ready' && state.info?.listid) {
+    collectEligibleRef.current = !collectedPlaylist;
+  }
+  const showCollect = collectEligibleRef.current === true;
   const countText = totalCount
     ? filtering
       ? `共 ${totalCount} 首 · 匹配 ${rows.length} 首`
@@ -142,6 +163,44 @@ export default function PlaylistScreen() {
 
   function clearKeyword() {
     setKeyword('');
+  }
+
+  /**
+   * 收藏这个歌单。
+   *
+   * 走 `playlist_add` 的收藏分支：创建者 userid + 数字 listid 缺一不可，
+   * 任一缺失就说明这条接口没带全（不同端版本字段名不一致），直接提示而不是瞎试。
+   *
+   * 取消收藏不在这里做：「我的 → 收藏的歌单 → 删除」才是那个入口（与原来一致），
+   * 详情页的心形只负责「收藏」，避免同一动作两套入口、两套文案。
+   */
+  async function handleCollect() {
+    const info = state.info;
+    if (collecting) {
+      return;
+    }
+    if (!info?.listid || !info.createUserid) {
+      showToast('这个歌单拿不到收藏所需信息，暂时无法收藏');
+      console.warn('[playlist] 缺少收藏参数', { listid: info?.listid, createUserid: info?.createUserid });
+      return;
+    }
+
+    setCollecting(true);
+    try {
+      await libraryActions.collectPlaylist({
+        name: info.name,
+        listid: info.listid,
+        createUserid: info.createUserid,
+      });
+      setCollectedOnce(true);
+      showToast('已收藏，可在「我的」页查看');
+      void libraryActions.ensure().catch(() => undefined);
+    } catch (error) {
+      console.warn('[playlist] 收藏失败:', error);
+      showToast(error instanceof Error ? error.message : '收藏失败，请稍后重试');
+    } finally {
+      setCollecting(false);
+    }
   }
 
   /** 空结果里的「清除筛选」：顺手收起键盘，好让用户马上看到完整列表。 */
@@ -521,7 +580,7 @@ export default function PlaylistScreen() {
               空歌单整行不渲染，也不会留下一条空白间距。
             */}
             {state.tracks.length ? (
-              <XStack alignSelf="flex-start" alignItems="center" gap={10}>
+              <XStack alignSelf="flex-start" alignItems="center" gap={10} flexWrap="wrap">
                 {/* 筛选只影响列表显示：这里仍从原始第 0 首播完整队列（见 playFrom） */}
                 <XStack
                   alignItems="center"
@@ -555,6 +614,37 @@ export default function PlaylistScreen() {
                     <Ionicons name="checkmark-circle-outline" size={17} color={palette.text} />
                     <Text color={palette.text} fontSize={14} fontWeight="600">
                       多选
+                    </Text>
+                  </XStack>
+                ) : null}
+
+                {/* 收藏 / 已收藏：只对「搜索进来、还没收藏」的歌单显示；宽度固定，避免文案变化导致整行重排 */}
+                {showCollect ? (
+                  <XStack
+                    alignItems="center"
+                    justifyContent="center"
+                    gap={6}
+                    height={44}
+                    minWidth={96}
+                    paddingHorizontal={16}
+                    borderRadius={22}
+                    backgroundColor={palette.card}
+                    borderWidth={StyleSheet.hairlineWidth}
+                    borderColor={collected ? palette.accent : palette.border}
+                    opacity={collecting ? 0.6 : 1}
+                    transition="quickest"
+                    pressStyle={collected ? undefined : { opacity: 0.75, scale: 0.97 }}
+                    onPress={collected ? undefined : () => void handleCollect()}>
+                    <Ionicons
+                      name={collected ? 'heart' : 'heart-outline'}
+                      size={17}
+                      color={collected ? palette.accent : palette.text}
+                    />
+                    <Text
+                      color={collected ? palette.accent : palette.text}
+                      fontSize={14}
+                      fontWeight="600">
+                      {collected ? '已收藏' : collecting ? '收藏中…' : '收藏'}
                     </Text>
                   </XStack>
                 ) : null}

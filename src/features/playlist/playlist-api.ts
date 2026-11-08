@@ -8,6 +8,10 @@ export type PlaylistInfo = {
   intro: string;
   coverUrl: string | null;
   count: number;
+  /** 歌单的**数字 ID**（写操作专用，与路由用的 gid 不是一回事）。 */
+  listid: string;
+  /** 创建者 userid：收藏时要靠它告诉服务端「这是谁的歌单」。 */
+  createUserid: string;
 };
 
 export type PlaylistTracksPage = {
@@ -40,6 +44,9 @@ export async function fetchPlaylistTracks(
         intro: pickText(listInfo.intro),
         coverUrl: sizedImage(pickText(listInfo.pic), 480),
         count,
+        // 收藏要用：不同版本字段名不一致，两种都认一下
+        listid: pickStringLike(listInfo.listid ?? listInfo.list_create_listid),
+        createUserid: pickStringLike(listInfo.list_create_userid),
       }
     : null;
 

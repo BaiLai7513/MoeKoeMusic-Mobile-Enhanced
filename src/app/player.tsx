@@ -6,7 +6,6 @@ import {
   BackHandler,
   ScrollView,
   StyleSheet,
-  InteractionManager,
   useWindowDimensions,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -315,8 +314,13 @@ export default function PlayerScreen() {
   }, []);
 
   useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => setLyricsMounted(true));
-    return () => task.cancel();
+    /*
+     * 原来用 InteractionManager.runAfterInteractions 延后一帧挂载歌词。
+     * RN 0.8x 已弃用该 API（日志里那 8 条 `InteractionManager has been deprecated` 就是它），
+     * 这里换成 requestAnimationFrame：同样只延后一帧，效果一致且不再产生警告。
+     */
+    const frame = requestAnimationFrame(() => setLyricsMounted(true));
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {

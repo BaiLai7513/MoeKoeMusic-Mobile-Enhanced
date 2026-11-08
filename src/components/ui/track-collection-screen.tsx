@@ -37,6 +37,10 @@ type TrackCollectionScreenProps = {
   showRank?: boolean;
   emptyText: string;
   loadPage: (page: number) => Promise<TrackPage>;
+  /** 头部次要操作文案（如「添加至歌单」）；不传则不渲染该按钮。 */
+  headerActionLabel?: string;
+  /** 点击头部次要操作时回调，带上当前已加载的曲目。 */
+  onHeaderAction?: (tracks: PlayerTrack[]) => void;
 };
 
 type ScreenState = {
@@ -60,6 +64,8 @@ export function TrackCollectionScreen({
   showRank = false,
   emptyText,
   loadPage,
+  headerActionLabel,
+  onHeaderAction,
 }: TrackCollectionScreenProps) {
   const palette = usePalette();
   const isDark = useIsDark();
@@ -234,7 +240,7 @@ export function TrackCollectionScreen({
             </XStack>
 
             {state.tracks.length ? (
-              <XStack alignSelf="flex-start" alignItems="center" gap={10}>
+              <XStack alignSelf="flex-start" alignItems="center" gap={10} flexWrap="wrap">
                 <XStack
                   alignItems="center"
                   gap={7}
@@ -250,6 +256,26 @@ export function TrackCollectionScreen({
                     播放全部
                   </Text>
                 </XStack>
+
+                {headerActionLabel && onHeaderAction ? (
+                  <XStack
+                    alignItems="center"
+                    gap={6}
+                    height={44}
+                    paddingHorizontal={18}
+                    borderRadius={22}
+                    backgroundColor={palette.card}
+                    borderWidth={StyleSheet.hairlineWidth}
+                    borderColor={palette.border}
+                    transition="quickest"
+                    pressStyle={{ opacity: 0.75, scale: 0.97 }}
+                    onPress={() => onHeaderAction(state.tracks)}>
+                    <Ionicons name="add-circle-outline" size={17} color={palette.text} />
+                    <Text color={palette.text} fontSize={14} fontWeight="600">
+                      {headerActionLabel}
+                    </Text>
+                  </XStack>
+                ) : null}
 
                 {canBatch && !batch.selectMode ? (
                   <XStack

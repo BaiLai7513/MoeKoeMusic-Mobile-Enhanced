@@ -6,6 +6,7 @@ import { bootstrapMobileApi } from '@/lib/kugou-api';
 import { readCache, writeCache } from '@/lib/offline-cache';
 import {
   addTracksToPlaylist,
+  collectPlaylist as collectPlaylistRequest,
   createPlaylist,
   deletePlaylist as deletePlaylistRemote,
   fetchLibraryPlaylists,
@@ -232,6 +233,21 @@ export const libraryActions = {
     // 后台补拉真实 fileid，供后续"取消喜欢"使用
     void refreshLikedMap().catch(() => undefined);
     return 'liked';
+  },
+
+  /** 收藏一个别人的歌单（不是创建）；成功后刷新「我的」歌单列表。 */
+  async collectPlaylist(input: {
+    name: string;
+    listid: string;
+    createUserid: string;
+  }): Promise<void> {
+    if (!isLoggedIn()) {
+      throw new Error('请先登录');
+    }
+
+    await collectPlaylistRequest(input);
+    // 收藏会改变「我的 → 收藏的歌单」，重拉一次让列表立刻可见
+    await libraryActions.refresh();
   },
 
   /** 收藏歌曲到指定歌单。 */

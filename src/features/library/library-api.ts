@@ -118,6 +118,29 @@ export function isPlaylistUncollectable(playlist: LibraryPlaylist): boolean {
 }
 
 /**
+ * 收藏一个**别人的**歌单（`playlist_add` 的 type=1 分支）。
+ *
+ * 参数与创建歌单是同一个接口，区别在于：创建只传 name；收藏要把原歌单的
+ * `list_create_userid` + `list_create_listid` 一起带上，服务端据此找到源歌单。
+ * 取消收藏走 `deletePlaylist`（`playlist_del` 对收藏来的歌单只做取消收藏）。
+ */
+export async function collectPlaylist(input: {
+  name: string;
+  listid: string;
+  createUserid: string;
+}): Promise<void> {
+  await bootstrapMobileApi();
+  const response = await mobileApi.playlist_add({
+    name: input.name,
+    type: 1,
+    source: 1,
+    list_create_userid: input.createUserid,
+    list_create_listid: input.listid,
+  });
+  ensureOk(response.body, '收藏歌单失败');
+}
+
+/**
  * 收藏歌曲到歌单。data 串按 `,`/`|` 拆分，
  * 所以歌名里的这两个分隔符必须剔除；直调模块不要再 URL 编码。
  */
